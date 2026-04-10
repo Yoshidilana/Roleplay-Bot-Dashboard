@@ -60,21 +60,38 @@
             const [shops, setShops] = useState([]);
             const [families, setFamilies] = useState([]);
             const [selectedItem, setSelectedItem] = useState(null);
-
-            // ID del server attuale (puoi renderlo dinamico in futuro)
+            const [shopItems, setShopItems] = React.useState({});
             const guildId = '1474184081267884136';
 
+            // 1. Caricamento dati generali (Citizens, Shops, Families)
             useEffect(() => {
                 window.FB.signInAnonymously(window.auth);
                 
-                // Tutti i dati ora sono letti dall'interno del documento della Guild
                 window.FB.onSnapshot(window.FB.collection(window.db, 'guilds', guildId, 'users'), s => setCitizens(s.docs.map(d => ({ id: d.id, ...d.data() }))));
                 window.FB.onSnapshot(window.FB.collection(window.db, 'guilds', guildId, 'shops'), s => setShops(s.docs.map(d => ({ id: d.id, ...d.data() }))));
                 window.FB.onSnapshot(window.FB.collection(window.db, 'guilds', guildId, 'families'), s => setFamilies(s.docs.map(d => ({ id: d.id, ...d.data() }))));
             }, []);
 
+            // 2. Caricamento dinamico prodotti quando si apre uno SHOP
+            useEffect(() => {
+                if (selectedItem?.type_modale === 'shop') {
+                    const itemsRef = window.FB.collection(window.db, 'guilds', guildId, 'shops', selectedItem.id, 'items');
+                    const unsubscribe = window.FB.onSnapshot(itemsRef, (snapshot) => {
+                        const items = {};
+                        snapshot.forEach(doc => {
+                            items[doc.id] = doc.data();
+                        });
+                        setShopItems(items);
+                    });
+                    return () => unsubscribe();
+                } else {
+                    setShopItems({});
+                }
+            }, [selectedItem]);
+
             const getFullMemberData = (targetStr) => {
                 if (!targetStr) return { nome: "Nessuno", eta: "N/A", sesso: "N/A", money: 0 };
+                
                 const cleanId = String(targetStr).replace('<@', '').replace('>', '').replace('!', '').trim();
                 const altId = cleanId.toLowerCase().replace(/ /g, "_");
                 const u = citizens.find(c => String(c.id) === cleanId || String(c.id) === altId);
@@ -84,8 +101,16 @@
                     const oggi = new Date();
                     let eta = oggi.getFullYear() - a;
                     if (oggi.getMonth() + 1 < m || (oggi.getMonth() + 1 === m && oggi.getDate() < g)) eta--;
-                    return { ...u, nome: `${u.nome} ${u.cognome || ''}`.trim(), eta, sesso: u.sesso || "N/D", money: u.money || 0 };
+                    
+                    return { 
+                        ...u, 
+                        nome: `${u.nome} ${u.cognome || ''}`.trim(), 
+                        eta, 
+                        sesso: u.sesso || "N/D", 
+                        money: u.money || 0 
+                    };
                 }
+                
                 return { nome: targetStr, eta: "N/A", sesso: "N/A", money: 0 };
             };
 
@@ -109,7 +134,7 @@
                                     <Avatar user={c} />
                                     <div className="flex-1 min-w-0">
                                         <div className="flex justify-between items-start">
-                                            <h3 className="font-bold uppercase truncate italic">{c.nome} {c.cognome}</h3>
+                                            <h3 className="font-bold uppercase">{c.nome} {c.cognome}</h3>
                                             <span className="font-black text-blue-600 text-[10px] ml-2 shrink-0">€{c.money || 0}</span>
                                         </div>
                                         <p className="text-[10px] text-slate-400 font-bold uppercase truncate">{c.lavoro || 'Cittadino'}</p>
@@ -155,33 +180,78 @@
                                         </button>
                                     </div>
 
-                                    {/* CONTENUTO MODALE SHOP */}
-                                    {selectedItem.type_modale === 'shop' && (
-                                        <div className="space-y-6">
-                                            <div className="bg-slate-50 p-6 rounded-3xl flex items-center gap-4">
-                                                <Avatar user={getFullMemberData(selectedItem.owner_id)} size="lg" />
-                                                <div>
-                                                    <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Proprietario</p>
-                                                    <p className="font-black text-xl uppercase italic">{getFullMemberData(selectedItem.owner_id).nome}</p>
-                                                </div>
-                                            </div>
-                                            <div>
-                                                <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-3 px-2">💼 Staff</h4>
-                                                <div className="space-y-2">
-                                                    {(selectedItem.dipendenti || []).map(d_id => {
-                                                        const d = getFullMemberData(d_id);
-                                                        return (
-                                                            <div key={d_id} className="p-3 bg-white border border-slate-100 rounded-2xl flex items-center gap-3 shadow-sm">
-                                                                <Avatar user={d} />
-                                                                <span className="font-bold text-slate-700">{d.nome}</span>
-                                                            </div>
-                                                        );
-                                                    })}
-                                                </div>
-                                            </div>
-                                        </div>
-                                    )}
+{/* CONTENUTO MODALE SHOP */}
+{selectedItem.type_modale === 'shop' && (
+    <div className="space-y-6">
+        <div className="bg-slate-50 p-6 rounded-3xl flex items-center gap-4">
+            <Avatar user={getFullMemberData(selectedItem.owner_id)} size="lg" />
+            <div>
+                <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Proprietario</p>
+                <p className="font-black text-xl uppercase italic">{getFullMemberData(selectedItem.owner_id).nome}</p>
+            </div>
+        </div>
 
+        {/* SEZIONE PRODOTTI / CATALOGO (Lettura da sottocollezione items) */}
+        <div>
+            <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-3 px-2">📦 Catalogo Prodotti</h4>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                {/* Usiamo lo stato shopItems che viene caricato via useEffect */}
+                {Object.entries(shopItems || {}).length > 0 ? (
+                    Object.entries(shopItems).map(([nomeProd, dati]) => {
+                        let icon = "package";
+                        const n = nomeProd.toLowerCase();
+                        if (n.includes("cibo") || n.includes("pizza") || n.includes("panino")) icon = "utensils";
+                        else if (n.includes("vestito") || n.includes("maglia") || n.includes("scarpe")) icon = "shirt";
+                        else if (n.includes("trucco") || n.includes("rossetto") || n.includes("crema")) icon = "sparkles";
+                        else if (n.includes("drink") || n.includes("birra") || n.includes("acqua")) icon = "glass-water";
+
+                        return (
+                            <div key={nomeProd} className="p-3 bg-white border border-slate-100 rounded-2xl flex items-center justify-between shadow-sm">
+                                <div className="flex items-center gap-3">
+                                    <div className="p-2 bg-slate-50 rounded-xl text-slate-400">
+                                        <Icon name={icon} className="w-4 h-4" />
+                                    </div>
+                                    <div>
+                                        <p className="font-bold text-xs uppercase">{nomeProd}</p>
+                                        <div className="flex gap-2">
+                                            <p className="text-[9px] text-slate-400 font-bold uppercase">{dati.categoria || 'Articolo'}</p>
+                                            {dati.stock !== undefined && (
+                                                <p className="text-[9px] text-blue-500 font-bold uppercase">Disponibili: {dati.stock}</p>
+                                            )}
+                                        </div>
+                                    </div>
+                                </div>
+                                <div className="text-right">
+                                    <p className="text-xs font-black text-emerald-600">€{dati.prezzo || 0}</p>
+                                </div>
+                            </div>
+                        );
+                    })
+                ) : (
+                    <div className="col-span-2 py-8 text-center bg-slate-50 rounded-3xl border border-dashed border-slate-200">
+                         <p className="text-[10px] text-slate-400 uppercase font-black">Scaffali vuoti o in caricamento...</p>
+                    </div>
+                )}
+            </div>
+        </div>
+
+        {/* STAFF */}
+        <div>
+            <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-3 px-2">💼 Staff</h4>
+            <div className="space-y-2">
+                {(selectedItem.dipendenti || []).map(d_id => {
+                    const d = getFullMemberData(d_id);
+                    return (
+                        <div key={d_id} className="p-3 bg-white border border-slate-100 rounded-2xl flex items-center gap-3 shadow-sm">
+                            <Avatar user={d} />
+                            <span className="font-bold text-slate-700">{d.nome}</span>
+                        </div>
+                    );
+                })}
+            </div>
+        </div>
+    </div>
+)}
                                     {/* CONTENUTO MODALE FAMILY */}
                                     {selectedItem.type_modale === 'family' && (() => {
                                         const p = getFullMemberData(selectedItem.padre);
