@@ -1,1 +1,241 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Roleplay - Management Console</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <script src="https://unpkg.com/lucide@latest"></script>
+</head>
+<body class="bg-[#F1F5F9]">
+    <div id="root"></div>
+
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
+        import { getFirestore, collection, onSnapshot, getDocs } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
+        import { getAuth, signInAnonymously } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-auth.js";
+
+        const firebaseConfig = {
+            apiKey: "AIzaSyBh_XF6DkccZ4_5wMTkWqnNFoG4xvMxwUc",
+            authDomain: "roleplay-bot-29ff5.firebaseapp.com",
+            projectId: "roleplay-bot-29ff5",
+            storageBucket: "roleplay-bot-29ff5.firebasestorage.app",
+            messagingSenderId: "695780341133",
+            appId: "1:695780341133:web:2a1fd53da485045b79b9c4"
+        };
+
+        const app = initializeApp(firebaseConfig);
+        window.db = getFirestore(app);
+        window.auth = getAuth(app);
+        window.FB = { collection, onSnapshot, getDocs, signInAnonymously };
+    </script>
+
+    <script type="text/babel">
+        const { useState, useEffect } = React;
+
+        const Icon = ({ name, className = "" }) => {
+            useEffect(() => { lucide.createIcons(); }, [name]);
+            return <i data-lucide={name} className={`w-5 h-5 ${className}`}></i>;
+        };
+
+        const Avatar = ({ user, size = "md" }) => {
+            const dims = size === "lg" ? "w-16 h-16 text-xl" : "w-12 h-12 text-base";
+            // Cerca il link dell'immagine nei campi 'avatar' o 'foto'
+            if (user && (user.avatar || user.foto)) {
+                return <img src={user.avatar || user.foto} className={`${dims} rounded-2xl object-cover shadow-sm`} alt="" />;
+            }
+            return (
+                <div className={`${dims} rounded-2xl bg-slate-200 flex items-center justify-center font-black text-slate-400 uppercase shadow-inner`}>
+                    {user?.nome ? user.nome[0] : "?"}
+                </div>
+            );
+        };
+
+        function App() {
+            const [view, setView] = useState('citizens');
+            const [citizens, setCitizens] = useState([]);
+            const [shops, setShops] = useState([]);
+            const [families, setFamilies] = useState([]);
+            const [selectedItem, setSelectedItem] = useState(null);
+
+            // ID del server attuale (puoi renderlo dinamico in futuro)
+            const guildId = '1474184081267884136';
+
+            useEffect(() => {
+                window.FB.signInAnonymously(window.auth);
+                
+                // Tutti i dati ora sono letti dall'interno del documento della Guild
+                window.FB.onSnapshot(window.FB.collection(window.db, 'guilds', guildId, 'users'), s => setCitizens(s.docs.map(d => ({ id: d.id, ...d.data() }))));
+                window.FB.onSnapshot(window.FB.collection(window.db, 'guilds', guildId, 'shops'), s => setShops(s.docs.map(d => ({ id: d.id, ...d.data() }))));
+                window.FB.onSnapshot(window.FB.collection(window.db, 'guilds', guildId, 'families'), s => setFamilies(s.docs.map(d => ({ id: d.id, ...d.data() }))));
+            }, []);
+
+            const getFullMemberData = (targetStr) => {
+                if (!targetStr) return { nome: "Nessuno", eta: "N/A", sesso: "N/A", money: 0 };
+                const cleanId = String(targetStr).replace('<@', '').replace('>', '').replace('!', '').trim();
+                const altId = cleanId.toLowerCase().replace(/ /g, "_");
+                const u = citizens.find(c => String(c.id) === cleanId || String(c.id) === altId);
+
+                if (u) {
+                    const [g, m, a] = (u.nascita || '01/01/2000').split('/').map(Number);
+                    const oggi = new Date();
+                    let eta = oggi.getFullYear() - a;
+                    if (oggi.getMonth() + 1 < m || (oggi.getMonth() + 1 === m && oggi.getDate() < g)) eta--;
+                    return { ...u, nome: `${u.nome} ${u.cognome || ''}`.trim(), eta, sesso: u.sesso || "N/D", money: u.money || 0 };
+                }
+                return { nome: targetStr, eta: "N/A", sesso: "N/A", money: 0 };
+            };
+
+            return (
+                <div className="flex h-screen overflow-hidden text-slate-900 font-sans">
+                    <aside className="w-64 bg-[#0F172A] text-slate-400 p-6 flex flex-col shadow-2xl shrink-0">
+                        <div className="flex items-center gap-3 mb-12 text-white"><Icon name="shield" /><span className="font-black text-xl tracking-tighter uppercase italic">Roleplay dashboard</span></div>
+                        <nav className="space-y-2">
+                            <NavItem active={view === 'citizens'} icon="users" label="Cittadini" onClick={() => setView('citizens')} />
+                            <NavItem active={view === 'shops'} icon="store" label="Lavori & Staff" onClick={() => setView('shops')} />
+                            <NavItem active={view === 'families'} icon="castle" label="Famiglie" onClick={() => setView('families')} />
+                        </nav>
+                    </aside>
+
+                    <main className="flex-1 p-8 overflow-auto">
+                        <h2 className="text-3xl font-black mb-8 uppercase tracking-tighter italic">{view}</h2>
+                        
+                        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                            {view === 'citizens' && citizens.map(c => (
+                                <div key={c.id} className="bg-white p-6 rounded-[2rem] border shadow-sm flex items-center gap-4 hover:border-blue-400 transition-all">
+                                    <Avatar user={c} />
+                                    <div className="flex-1 min-w-0">
+                                        <div className="flex justify-between items-start">
+                                            <h3 className="font-bold uppercase truncate italic">{c.nome} {c.cognome}</h3>
+                                            <span className="font-black text-blue-600 text-[10px] ml-2 shrink-0">€{c.money || 0}</span>
+                                        </div>
+                                        <p className="text-[10px] text-slate-400 font-bold uppercase truncate">{c.lavoro || 'Cittadino'}</p>
+                                    </div>
+                                </div>
+                            ))}
+
+                            {view === 'shops' && shops.map(s => (
+                                <div key={s.id} onClick={() => setSelectedItem({ ...s, type_modale: 'shop' })} className="bg-white p-6 rounded-[2.5rem] border shadow-sm hover:border-emerald-400 transition-all cursor-pointer group">
+                                    <div className="flex justify-between mb-4">
+                                        <div className="p-3 bg-slate-100 rounded-2xl group-hover:bg-emerald-500 group-hover:text-white transition-colors"><Icon name="briefcase" /></div>
+                                        <span className="text-[10px] font-black bg-slate-100 px-3 py-1 rounded-full text-slate-500 uppercase">{s.type}</span>
+                                    </div>
+                                    <h3 className="font-black uppercase text-lg">{s.id}</h3>
+                                    <p className="text-xs text-slate-400 font-bold uppercase">Titolare: {getFullMemberData(s.owner_id).nome}</p>
+                                    <div className="mt-4 text-[10px] font-black text-emerald-600 uppercase flex items-center gap-1">Vedi Organigramma <Icon name="chevron-right" size={14}/></div>
+                                </div>
+                            ))}
+
+                            {view === 'families' && families.map(f => (
+                                <div key={f.id} onClick={() => setSelectedItem({ ...f, type_modale: 'family' })} className="bg-white p-6 rounded-[2.5rem] border shadow-sm hover:border-blue-400 transition-all cursor-pointer group">
+                                    <div className="flex justify-between mb-4">
+                                        <div className="p-3 bg-amber-50 text-amber-600 rounded-2xl group-hover:bg-amber-500 group-hover:text-white transition-colors"><Icon name="crown" /></div>
+                                        <span className="text-[10px] font-black bg-slate-100 px-3 py-1 rounded-full text-slate-500 uppercase">Famiglia</span>
+                                    </div>
+                                    <h3 className="font-black uppercase text-lg">🏰 {f.nome || f.id}</h3>
+                                    <p className="text-xs text-slate-400 font-bold uppercase mt-1">Capofamiglia: {getFullMemberData(f.padre).nome}</p>
+                                    <div className="mt-4 text-[10px] font-black text-blue-500 uppercase flex items-center gap-1">Info Casata <Icon name="chevron-right" size={14}/></div>
+                                </div>
+                            ))}
+                        </div>
+                    </main>
+
+                    {selectedItem && (
+                        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4" onClick={() => setSelectedItem(null)}>
+                            <div className="bg-white w-full max-w-xl rounded-[3rem] overflow-hidden shadow-2xl" onClick={e => e.stopPropagation()}>
+                                <div className={`h-3 ${selectedItem.type_modale === 'shop' ? 'bg-[#1abc9c]' : 'bg-blue-500'}`}></div>
+                                <div className="p-10">
+                                    <div className="flex justify-between items-start mb-8">
+                                        <h3 className="text-3xl font-black uppercase italic">{selectedItem.nome || selectedItem.id}</h3>
+                                        <button onClick={() => setSelectedItem(null)} className="p-2 bg-slate-100 rounded-full hover:bg-red-50 text-slate-400 hover:text-red-500 transition-colors"><Icon name="x" /></button>
+                                    </div>
+
+                                    {selectedItem.type_modale === 'shop' && (
+                                        <div className="space-y-6">
+                                            <div className="bg-slate-50 p-6 rounded-3xl flex items-center gap-4">
+                                                <Avatar user={getFullMemberData(selectedItem.owner_id)} size="lg" />
+                                                <div>
+                                                    <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Proprietario</p>
+                                                    <p className="font-black text-xl uppercase italic">{getFullMemberData(selectedItem.owner_id).nome}</p>
+                                                </div>
+                                            </div>
+                                            <div>
+                                                <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-3 px-2">💼 Staff</h4>
+                                                <div className="space-y-2">
+                                                    {(selectedItem.dipendenti || []).map(d_id => {
+                                                        const d = getFullMemberData(d_id);
+                                                        return (
+                                                            <div key={d_id} className="p-3 bg-white border border-slate-100 rounded-2xl flex items-center gap-3 shadow-sm">
+                                                                <Avatar user={d} />
+                                                                <span className="font-bold text-slate-700">{d.nome}</span>
+                                                            </div>
+                                                        );
+                                                    })}
+                                                </div>
+                                            </div>
+                                        </div>
+                                    )}
+
+                                    {selectedItem.type_modale === 'family' && (() => {
+                                        const p = getFullMemberData(selectedItem.padre);
+                                        const m = getFullMemberData(selectedItem.madre);
+                                        return (
+                                            <div className="space-y-6">
+                                                <div className="text-blue-600 font-bold flex items-center gap-2 mb-4"><Icon name="banknote" size={16}/> Patrimonio Genitori: €{(p.money + m.money).toLocaleString()}</div>
+                                                <div className="grid grid-cols-2 gap-4">
+                                                    <div className="p-4 bg-slate-50 rounded-3xl border border-blue-50 flex flex-col items-center text-center">
+                                                        <Avatar user={p} size="lg" className="mb-3" />
+                                                        <p className="text-[10px] font-black text-blue-400 uppercase mb-2 mt-2">Padre</p>
+                                                        <p className="font-black text-sm uppercase">{p.nome}</p>
+                                                        <p className="text-[10px] text-slate-400 font-bold">Età: {p.eta} | {p.sesso}</p>
+                                                    </div>
+                                                    <div className="p-4 bg-slate-50 rounded-3xl border border-pink-50 flex flex-col items-center text-center">
+                                                        <Avatar user={m} size="lg" className="mb-3" />
+                                                        <p className="text-[10px] font-black text-pink-400 uppercase mb-2 mt-2">Madre</p>
+                                                        <p className="font-black text-sm uppercase">{m.nome}</p>
+                                                        <p className="text-[10px] text-slate-400 font-bold">Età: {m.eta} | {m.sesso}</p>
+                                                    </div>
+                                                </div>
+                                                <div>
+                                                    <h4 className="text-[10px] font-black text-slate-400 uppercase mb-3 px-2">Discendenza</h4>
+                                                    {(Object.entries(selectedItem.figli || {})).map(([id, ruolo]) => {
+                                                        const f = getFullMemberData(id);
+                                                        return (
+                                                            <div key={id} className="flex justify-between items-center p-3 bg-white border rounded-2xl mb-2 shadow-sm">
+                                                                <div className="flex items-center gap-3">
+                                                                    <Avatar user={f} />
+                                                                    <div><span className="font-black text-xs uppercase">{f.nome}</span><p className="text-[10px] text-blue-500 font-bold uppercase">{ruolo}</p></div>
+                                                                </div>
+                                                                <div className="text-[10px] font-bold text-slate-400 uppercase text-right">Età: {f.eta}<br/>{f.sesso}</div>
+                                                            </div>
+                                                        );
+                                                    })}
+                                                </div>
+                                            </div>
+                                        );
+                                    })()}
+                                </div>
+                            </div>
+                        </div>
+                    )}
+                </div>
+            );
+        }
+
+        function NavItem({ active, icon, label, onClick }) {
+            return (
+                <button onClick={onClick} className={`w-full flex items-center gap-3 p-3 rounded-xl transition-all ${active ? 'bg-blue-600 text-white shadow-lg' : 'hover:bg-white/5'}`}>
+                    <Icon name={icon} /> <span className="font-bold text-sm uppercase tracking-tighter">{label}</span>
+                </button>
+            );
+        }
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+</html>
 
