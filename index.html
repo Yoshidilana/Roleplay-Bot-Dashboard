@@ -150,9 +150,12 @@
                                 <div className="p-10">
                                     <div className="flex justify-between items-start mb-8">
                                         <h3 className="text-3xl font-black uppercase italic">{selectedItem.nome || selectedItem.id}</h3>
-                                        <button onClick={() => setSelectedItem(null)} className="p-2 bg-slate-100 rounded-full hover:bg-red-50 text-slate-400 hover:text-red-500 transition-colors"><Icon name="x" /></button>
+                                        <button onClick={() => setSelectedItem(null)} className="p-2 bg-slate-100 rounded-full hover:bg-red-50 text-slate-400 hover:text-red-500 transition-colors">
+                                            <Icon name="x" />
+                                        </button>
                                     </div>
 
+                                    {/* CONTENUTO MODALE SHOP */}
                                     {selectedItem.type_modale === 'shop' && (
                                         <div className="space-y-6">
                                             <div className="bg-slate-50 p-6 rounded-3xl flex items-center gap-4">
@@ -179,12 +182,15 @@
                                         </div>
                                     )}
 
+                                    {/* CONTENUTO MODALE FAMILY */}
                                     {selectedItem.type_modale === 'family' && (() => {
                                         const p = getFullMemberData(selectedItem.padre);
                                         const m = getFullMemberData(selectedItem.madre);
                                         return (
                                             <div className="space-y-6">
-                                                <div className="text-blue-600 font-bold flex items-center gap-2 mb-4"><Icon name="banknote" size={16}/> Patrimonio Genitori: €{(p.money + m.money).toLocaleString()}</div>
+                                                <div className="text-blue-600 font-bold flex items-center gap-2 mb-4">
+                                                    <Icon name="banknote" size={16}/> Patrimonio Genitori: €{(p.money + m.money).toLocaleString()}
+                                                </div>
                                                 <div className="grid grid-cols-2 gap-4">
                                                     <div className="p-4 bg-slate-50 rounded-3xl border border-blue-50 flex flex-col items-center text-center">
                                                         <Avatar user={p} size="lg" className="mb-3" />
@@ -201,19 +207,52 @@
                                                 </div>
                                                 <div>
                                                     <h4 className="text-[10px] font-black text-slate-400 uppercase mb-3 px-2">Discendenza</h4>
-                                                    {(Object.entries(selectedItem.figli || {})).map(([id, ruolo]) => {
+                                                    {Object.entries(selectedItem.figli || {}).map(([id, ruolo]) => {
                                                         const f = getFullMemberData(id);
                                                         return (
                                                             <div key={id} className="flex justify-between items-center p-3 bg-white border rounded-2xl mb-2 shadow-sm">
                                                                 <div className="flex items-center gap-3">
                                                                     <Avatar user={f} />
-                                                                    <div><span className="font-black text-xs uppercase">{f.nome}</span><p className="text-[10px] text-blue-500 font-bold uppercase">{ruolo}</p></div>
+                                                                    <div>
+                                                                        <span className="font-black text-xs uppercase">{f.nome}</span>
+                                                                        <p className="text-[10px] text-blue-500 font-bold uppercase">{ruolo}</p>
+                                                                    </div>
                                                                 </div>
                                                                 <div className="text-[10px] font-bold text-slate-400 uppercase text-right">Età: {f.eta}<br/>{f.sesso}</div>
                                                             </div>
                                                         );
                                                     })}
                                                 </div>
+                                                {selectedItem.pets && selectedItem.pets.length > 0 && (
+                                                    <div className="mt-6">
+                                                        <h4 className="text-[10px] font-black text-slate-400 uppercase mb-3 px-2">Animali Domestici</h4>
+                                                        <div className="grid grid-cols-1 gap-2">
+                                                            {selectedItem.pets.map((pet, idx) => {
+                                                                const specie = (pet.specie || "").toLowerCase();
+                                                                let emoji = "🐾";
+                                                                if (specie.includes("cane")) emoji = "🐶";
+                                                                else if (specie.includes("gatto")) emoji = "🐱";
+                                                                else if (specie.includes("uccello") || specie.includes("pappa")) emoji = "🦜";
+                                                                else if (specie.includes("pesce")) emoji = "🐟";
+                                                                else if (specie.includes("drago")) emoji = "🐲";
+                                                                return (
+                                                                    <div key={idx} className="flex items-center justify-between p-3 bg-slate-50 border border-slate-100 rounded-2xl">
+                                                                        <div className="flex items-center gap-3">
+                                                                            <div className="w-10 h-10 bg-white rounded-xl flex items-center justify-center text-xl shadow-sm">{emoji}</div>
+                                                                            <div>
+                                                                                <span className="font-black text-xs uppercase">{pet.nome}</span>
+                                                                                <p className="text-[10px] text-slate-400 font-bold uppercase">{pet.specie}</p>
+                                                                            </div>
+                                                                        </div>
+                                                                        <div className="p-2 bg-white rounded-lg border border-slate-100">
+                                                                            <Icon name="heart" className="text-red-400 w-4 h-4" />
+                                                                        </div>
+                                                                    </div>
+                                                                );
+                                                            })}
+                                                        </div>
+                                                    </div>
+                                                )}
                                             </div>
                                         );
                                     })()}
