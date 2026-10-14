@@ -2241,11 +2241,10 @@ const availableJobCandidates = (citizens || []).filter(c => {
                         );
                     })}
                 </div>
-                {!selectedItem.isNew && (
-                    <div className="p-3 bg-emerald-50 rounded-2xl border border-dashed border-emerald-200">
+                <div className="p-3 bg-emerald-50 rounded-2xl border border-dashed border-emerald-200">
                         <label className="text-[9px] font-bold text-slate-500 uppercase mb-1 block">Seleziona un animale</label>
                         <div className="flex gap-2">
-                            <select
+<select
                                 value={selectedFamilyPetId}
                                 onChange={e => setSelectedFamilyPetId(e.target.value)}
                                 className="flex-1 min-w-0 p-2.5 rounded-xl text-xs border bg-white font-bold"
@@ -2253,7 +2252,9 @@ const availableJobCandidates = (citizens || []).filter(c => {
                                 <option value="">-- Seleziona un animale --</option>
                                 {citizens
                                     .filter(member => {
-                                        if (!isAnimalSpecies(member.specie)) return false;
+                                        // USA LA FUNZIONE CORRETTA CHE FUNZIONA ANCHE NELLE SCUOLE E NEI FIGLI
+                                        if (!isAnimalUser(member)) return false;
+                                        
                                         const alreadyInFamily = (selectedItem.pets || []).some(pet =>
                                             normalizeFamilyId(pet.id) === normalizeFamilyId(member.id)
                                         );
@@ -2312,7 +2313,13 @@ const availableJobCandidates = (citizens || []).filter(c => {
                                         nome: `${animal.nome || animal.id} ${animal.cognome || ''}`.trim(),
                                         specie: speciesRole
                                     };
-                                    const familyRef = window.FB.doc(window.db, 'guilds', guildId, 'families', selectedItem.id);
+                                    const familyId = String(selectedItem.id || '').trim();
+                                    if (!familyId) {
+                                        alert("Inserisci prima un ID per la famiglia.");
+                                        return;
+                                    }
+
+                                    const familyRef = window.FB.doc(window.db, 'guilds', guildId, 'families', familyId);
                                     const userRef = window.FB.doc(window.db, 'guilds', guildId, 'users', animal.id);
 
                                     try {
@@ -2324,10 +2331,22 @@ const availableJobCandidates = (citizens || []).filter(c => {
 
                                         const newPets = [...familyPets, newPet];
                                         const batch = window.FB.writeBatch(window.db);
-                                        batch.set(familyRef, { pets: newPets }, { merge: true });
+                                        if (selectedItem.isNew) {
+                                            const familySnapshot = await window.FB.getDoc(familyRef);
+                                            if (familySnapshot.exists()) {
+                                                alert("Esiste già una famiglia con questo ID. Scegli un ID diverso.");
+                                                return;
+                                            }
+                                            const familyData = { ...selectedItem };
+                                            delete familyData.isNew;
+                                            delete familyData.type_modale;
+                                            batch.set(familyRef, { ...familyData, id: familyId, pets: newPets });
+                                        } else {
+                                            batch.set(familyRef, { pets: newPets }, { merge: true });
+                                        }
                                         batch.set(userRef, { family_role: familyRole }, { merge: true });
                                         await batch.commit();
-                                        setSelectedItem({ ...selectedItem, pets: newPets });
+                                        setSelectedItem({ ...selectedItem, id: familyId, isNew: false, pets: newPets });
                                         setSelectedFamilyPetId('');
                                     } catch (e) {
                                         console.error("Errore durante l'aggiunta dell'animale alla famiglia:", e);
@@ -2339,12 +2358,10 @@ const availableJobCandidates = (citizens || []).filter(c => {
                                 Aggiungi
                             </button>
                         </div>
-                        {citizens.filter(member => isAnimalSpecies(member.specie)).length === 0 && (
-                            <p className="text-[10px] text-slate-500 mt-2">Non ci sono personaggi con una specie animale.</p>
-                        )}
-                    </div>
-                )}
-                {selectedItem.isNew && <p className="text-[10px] text-slate-500 font-bold">Salva prima la famiglia per aggiungere gli animali.</p>}
+{citizens.filter(member => isAnimalUser(member)).length === 0 && (
+    <p className="text-[10px] text-slate-500 mt-2">Non ci sono personaggi con una specie animale.</p>
+)}
+                </div>
             </div>
         </div>
     );
