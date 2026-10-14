@@ -4,18 +4,29 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Roleplay - Management Console</title>
+
+    <!-- CONFIGURAZIONE PWA (Mobile / Desktop) -->
+    <link rel="manifest" href="manifest.json">
+    <meta name="theme-color" content="#0f172a">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <link rel="apple-touch-icon" href="icon-192.png">
+
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
     <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
     <script src="https://unpkg.com/lucide@latest"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/cropperjs/1.5.13/cropper.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/cropperjs/1.5.13/cropper.min.js"></script>
 </head>
 <body class="bg-[#F1F5F9]">
     <div id="root"></div>
 
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
-        import { getFirestore, collection, onSnapshot, getDocs } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
+        import { getFirestore, collection, onSnapshot, getDocs, doc, updateDoc, setDoc, addDoc, deleteDoc } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
         import { getAuth, signInAnonymously } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-auth.js";
 
         const firebaseConfig = {
@@ -30,7 +41,7 @@
         const app = initializeApp(firebaseConfig);
         window.db = getFirestore(app);
         window.auth = getAuth(app);
-        window.FB = { collection, onSnapshot, getDocs, signInAnonymously };
+        window.FB = { collection, onSnapshot, getDocs, signInAnonymously, doc, updateDoc, setDoc, addDoc, deleteDoc };
     </script>
 
     <script type="text/babel">
@@ -41,42 +52,272 @@
             return <i data-lucide={name} className={`w-5 h-5 ${className}`}></i>;
         };
 
-        const Avatar = ({ user, size = "md" }) => {
+      const Avatar = ({ user, size = "md" }) => {
             const dims = size === "lg" ? "w-16 h-16 text-xl" : "w-12 h-12 text-base";
-            // Cerca il link dell'immagine nei campi 'avatar' o 'foto'
-            if (user && (user.avatar || user.foto)) {
-                return <img src={user.avatar || user.foto} className={`${dims} rounded-2xl object-cover shadow-sm`} alt="" />;
+            // Sincronizzato con App A: usa solo il campo 'avatar'
+            if (user && user.avatar) {
+                return <img src={user.avatar} className={`${dims} rounded-2xl object-cover shadow-sm`} alt="" />;
             }
             return (
                 <div className={`${dims} rounded-2xl bg-slate-200 flex items-center justify-center font-black text-slate-400 uppercase shadow-inner`}>
                     {user?.nome ? user.nome[0] : "?"}
                 </div>
             );
+                };
+
+        const ImageCropper = ({ src, onCrop, onCancel }) => {
+            const imgRef = React.useRef(null);
+            const cropperRef = React.useRef(null);
+
+            React.useEffect(() => {
+                if (imgRef.current) {
+                    cropperRef.current = new Cropper(imgRef.current, {
+                        aspectRatio: 1,
+                        viewMode: 1,
+                        dragMode: 'move',
+                        autoCropArea: 1,
+                        restore: false,
+                        guides: false,
+                        center: false,
+                        highlight: false,
+                        cropBoxMovable: true,
+                        cropBoxResizable: true,
+                        toggleDragModeOnDblclick: false,
+                    });
+                }
+                return () => cropperRef.current?.destroy();
+            }, [src]);
+
+            return (
+                <div className="fixed inset-0 bg-slate-900/90 z-[100] flex flex-col items-center justify-center p-4 backdrop-blur-md">
+                    <div className="max-w-md w-full bg-white rounded-[2.5rem] overflow-hidden shadow-2xl">
+                        <div className="p-6 border-b flex justify-between items-center">
+                            <span className="font-black uppercase tracking-tighter text-lg italic">Ritaglia Foto</span>
+                            <button onClick={onCancel} className="p-2 bg-slate-100 rounded-full text-slate-400 hover:text-red-500 transition-colors">
+                                <Icon name="x" />
+                            </button>
+                        </div>
+                        <div className="aspect-square bg-slate-100 overflow-hidden">
+                            <img ref={imgRef} src={src} style={{ display: 'block', maxWidth: '100%' }} />
+                        </div>
+                        <div className="p-8">
+                            <button 
+                                onClick={() => {
+                                    const canvas = cropperRef.current.getCroppedCanvas({ width: 512, height: 512 });
+                                    onCrop(canvas.toDataURL('image/jpeg', 0.9));
+                                }}
+                                className="w-full bg-blue-600 text-white py-4 rounded-2xl font-black uppercase tracking-widest hover:bg-blue-700 shadow-lg shadow-blue-200 transition-all"
+                            >
+                                Conferma Ritaglio
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            );
         };
 
-        function App() {
-            const [view, setView] = useState('citizens');
-            const [citizens, setCitizens] = useState([]);
-            const [shops, setShops] = useState([]);
-            const [families, setFamilies] = useState([]);
-            const [selectedItem, setSelectedItem] = useState(null);
-            const [shopItems, setShopItems] = React.useState({});
-            const guildId = '1474184081267884136';
+function App() {
+    const [view, setView] = useState('citizens'); // 'citizens' | 'shops' | 'jobs' | 'families' | 'buildings' | 'school'
+    const [citizens, setCitizens] = useState([]);
+    const [shops, setShops] = useState([]);
+    const [families, setFamilies] = useState([]);
+    const [jobs, setJobs] = useState([]);
+    const [buildings, setBuildings] = useState([]);
+    const [selectedItem, setSelectedItem] = useState(null);
+    const [shopItems, setShopItems] = React.useState({});
+    const [cropImage, setCropImage] = useState(null);
+    const [selectedSchool, setSelectedSchool] = useState(null);
+    const [newSchoolName, setNewSchoolName] = useState('');
+    const [selectedClass, setSelectedClass] = useState('');
+    const [newNpcClass, setNewNpcClass] = useState('');
+    const [npcSesso, setNpcSesso] = useState('M'); // <-- AGGIUNTO QUESTO!
+    
+    const guildId = '1474184081267884136';
 
-            // 1. Caricamento dati generali (Citizens, Shops, Families)
-            useEffect(() => {
-                window.FB.signInAnonymously(window.auth);
-                
-                window.FB.onSnapshot(window.FB.collection(window.db, 'guilds', guildId, 'users'), s => setCitizens(s.docs.map(d => ({ id: d.id, ...d.data() }))));
-                window.FB.onSnapshot(window.FB.collection(window.db, 'guilds', guildId, 'shops'), s => setShops(s.docs.map(d => ({ id: d.id, ...d.data() }))));
-                window.FB.onSnapshot(window.FB.collection(window.db, 'guilds', guildId, 'families'), s => setFamilies(s.docs.map(d => ({ id: d.id, ...d.data() }))));
-            }, []);
+    // Alias per la lista cittadini usata dai filtri scolastici
+    const utentiCache = citizens; // <-- AGGIUNTO QUESTO!
+
+    // Stati specifici per la gestione scolastica
+    const [schoolStudents, setSchoolStudents] = useState([]);
+    const [schoolStaff, setSchoolStaff] = useState([]);
+    const [schoolBackgroundNpcs, setSchoolBackgroundNpcs] = useState([]);
+    const [schoolEnrollments, setSchoolEnrollments] = useState({});
+    const [schoolTab, setSchoolTab] = useState('studenti'); // 'studenti' | 'staff' | 'sfondo'
+
+    // Form temporanei per creazione NPC
+    const [newNpcName, setNewNpcName] = useState('');
+    const [newNpcRole, setNewNpcRole] = useState('');
+
+    // 1. Caricamento dati generali
+    useEffect(() => {
+        window.FB.signInAnonymously(window.auth);
+        
+        window.FB.onSnapshot(window.FB.collection(window.db, 'guilds', guildId, 'users'), s => setCitizens(s.docs.map(d => ({ id: d.id, ...d.data() }))));
+        window.FB.onSnapshot(window.FB.collection(window.db, 'guilds', guildId, 'shops'), s => setShops(s.docs.map(d => ({ id: d.id, ...d.data() }))));
+        window.FB.onSnapshot(window.FB.collection(window.db, 'guilds', guildId, 'families'), s => setFamilies(s.docs.map(d => ({ id: d.id, ...d.data() }))));
+        window.FB.onSnapshot(window.FB.collection(window.db, 'guilds', guildId, 'jobs'), s => setJobs(s.docs.map(d => ({ id: d.id, ...d.data() }))));
+        window.FB.onSnapshot(window.FB.collection(window.db, 'guilds', guildId, 'edifici'), s => setBuildings(s.docs.map(d => ({ id: d.id, ...d.data() }))));
+    }, []);
+
+        useEffect(() => {
+            const schools = buildings.filter(b =>
+                b.tipo?.startsWith('scuola') ||
+                b.id.toLowerCase().includes('scuola') ||
+                b.id.toLowerCase().includes('liceo')
+            );
+
+            setSchoolEnrollments({});
+            if (!schools.length) return;
+
+            let active = true;
+            const unsubscribe = schools.map(school =>
+                window.FB.onSnapshot(
+                    window.FB.collection(window.db, 'guilds', guildId, 'edifici', school.id, 'studenti'),
+                    snapshot => {
+                        if (!active) return;
+                        setSchoolEnrollments(current => ({
+                            ...current,
+                            [school.id]: snapshot.docs.map(d => ({ id: d.id, ...d.data() }))
+                        }));
+                    },
+                    error => console.error(`Errore caricamento iscritti di ${school.nome || school.id}:`, error)
+                )
+            );
+
+            return () => {
+                active = false;
+                unsubscribe.forEach(unsubscribeSchool => unsubscribeSchool());
+            };
+        }, [buildings]);
+
+    // 2. Caricamento in tempo reale delle sottocollezioni della Scuola
+    useEffect(() => {
+    if (view === 'school' && selectedSchool?.id) {
+        const schoolRef = window.FB.doc(window.db, 'guilds', guildId, 'edifici', selectedSchool.id);
+
+        const unStudenti = window.FB.onSnapshot(window.FB.collection(schoolRef, 'studenti'), s => {
+            setSchoolStudents(s.docs.map(d => ({ id: d.id, ...d.data() })));
+        });
+
+        const unStaff = window.FB.onSnapshot(window.FB.collection(schoolRef, 'staff'), s => {
+            setSchoolStaff(s.docs.map(d => ({ id: d.id, ...d.data() })));
+        });
+
+        const unSfondo = window.FB.onSnapshot(window.FB.collection(schoolRef, 'sfondo'), s => {
+            setSchoolBackgroundNpcs(s.docs.map(d => ({ id: d.id, ...d.data() })));
+        });
+
+        return () => {
+            unStudenti();
+            unStaff();
+            unSfondo();
+        };
+    } else {
+        setSchoolStudents([]);
+        setSchoolStaff([]);
+        setSchoolBackgroundNpcs([]);
+    }
+}, [view, selectedSchool]);
+
+// 1. Creare una Nuova Scuola
+const handleCreateSchool = async () => {
+    if (!newSchoolName.trim()) return;
+    const docId = newSchoolName.trim().replace(/\s+/g, '_');
+    try {
+        const schoolDocRef = window.FB.doc(window.db, 'guilds', guildId, 'edifici', docId);
+        await window.FB.setDoc(schoolDocRef, {
+            nome: newSchoolName.trim(),
+            tipo: 'scuola',
+            creatoIl: new Date().toISOString()
+        });
+        setNewSchoolName('');
+    } catch (e) { alert("Errore durante la creazione della scuola"); }
+};
+
+// 2. Aggiungere uno Studente Reale alla Scuola Selezionata
+const handleAddStudent = async (studentUserId) => {
+    if (!studentUserId || !selectedSchool?.id) return;
+    
+    // Controlla che la classe sia stata effettivamente digitata!
+    if (!selectedClass.trim()) {
+        alert("Inserisci la classe dello studente (es. 1°A, 3°B, 5°C)!");
+        return;
+    }
+
+    try {
+        const studentDocRef = window.FB.doc(window.db, 'guilds', guildId, 'edifici', selectedSchool.id, 'studenti', studentUserId);
+        
+        await window.FB.setDoc(studentDocRef, { 
+            classe: selectedClass.trim().toUpperCase(), // Converte in maiuscolo (es. 1a -> 1A)
+            dataIscrizione: new Date().toISOString() 
+        });
+
+        // Pulisce il campo classe dopo l'inserimento
+        setSelectedClass('');
+    } catch (e) { 
+        alert("Errore durante l'iscrizione dello studente"); 
+    }
+};
+
+// 3. Rimuovere uno Studente dalla Scuola Selezionata
+const handleRemoveStudent = async (studentUserId) => {
+    if (!selectedSchool?.id || !confirm("Rimuovere lo studente dall'istituto?")) return;
+    try {
+        const studentDocRef = window.FB.doc(window.db, 'guilds', guildId, 'edifici', selectedSchool.id, 'studenti', studentUserId);
+        await window.FB.deleteDoc(studentDocRef);
+    } catch (e) { alert("Errore nella rimozione"); }
+};
+
+// 4. Aggiungi NPC (Staff o Sfondo) alla Scuola Selezionata
+const handleAddNPC = async (tipoCollection) => {
+    if (!newNpcName.trim() || !selectedSchool?.id) return;
+    try {
+        const cleanedName = newNpcName.trim().toLowerCase().replace(/[^a-z0-9]/g, "_");
+        const customDocId = `npc_${Date.now()}_${cleanedName}`;
+
+        // Riferimento al documento con ID personalizzato
+        const docRef = window.FB.doc(window.db, 'guilds', guildId, 'edifici', selectedSchool.id, tipoCollection, customDocId);
+        
+        const payload = {
+            nome: newNpcName.trim(),
+            ruolo: newNpcRole.trim() || (tipoCollection === 'staff' ? 'Docente' : 'Compagno di classe'),
+            sesso: npcSesso, // Passa il sesso per le emoji
+            creatoIl: new Date()
+        };
+
+        // Se stiamo aggiungendo un NPC di Sfondo, aggiungiamo anche la classe!
+        if (tipoCollection === 'sfondo' && newNpcClass.trim()) {
+            payload.classe = newNpcClass.trim().toUpperCase();
+        }
+
+        // Salva con setDoc usando l'ID personalizzato
+        await window.FB.setDoc(docRef, payload);
+
+        // Reset dei campi
+        setNewNpcName('');
+        setNewNpcRole('');
+        setNewNpcClass('');
+    } catch (e) { 
+        console.error("Errore salvataggio NPC:", e);
+        alert("Errore nel salvataggio dell'NPC"); 
+    }
+};
+
+// 5. Elimina NPC dalla Scuola Selezionata
+const handleDeleteNPC = async (tipoCollection, id) => {
+    if (!selectedSchool?.id || !confirm("Eliminare definitivamente questo NPC?")) return;
+    try {
+        const docRef = window.FB.doc(window.db, 'guilds', guildId, 'edifici', selectedSchool.id, tipoCollection, id);
+        await window.FB.deleteDoc(docRef);
+    } catch (e) { alert("Errore nell'eliminazione"); }
+};
 
             // 2. Caricamento dinamico prodotti quando si apre uno SHOP
             useEffect(() => {
-                if (selectedItem?.type_modale === 'shop') {
-                    const itemsRef = window.FB.collection(window.db, 'guilds', guildId, 'shops', selectedItem.id, 'items');
-                    const unsubscribe = window.FB.onSnapshot(itemsRef, (snapshot) => {
+if (selectedItem?.type_modale === 'shop') {
+    if (!selectedItem || selectedItem.isNew || !selectedItem.id) return;
+    const itemsRef = window.FB.collection(window.db, 'guilds', guildId, 'shops', selectedItem.id, 'items');
+    const unsubscribe = window.FB.onSnapshot(itemsRef, (snapshot) => {
                         const items = {};
                         snapshot.forEach(doc => {
                             items[doc.id] = doc.data();
@@ -89,6 +330,60 @@
                 }
             }, [selectedItem]);
 
+                                    const handleSave = async (collectionName, id, data) => {
+                // Rimuoviamo i campi di servizio UI prima di salvare nel database
+                const { isNew, type_modale, ...cleanData } = data;
+                try {
+                    const docRef = window.FB.doc(window.db, 'guilds', guildId, collectionName, id);
+                    await window.FB.setDoc(docRef, cleanData, { merge: true });
+                    setSelectedItem(null);
+                } catch (e) { alert("Errore nel salvataggio"); }
+            };
+
+            const handleDelete = async (collectionName, id) => {
+                if (!confirm("Eliminare definitivamente?")) return;
+                try {
+                    const docRef = window.FB.doc(window.db, 'guilds', guildId, collectionName, id);
+                    await window.FB.deleteDoc(docRef);
+                    setSelectedItem(null);
+                } catch (e) { alert("Errore nell'eliminazione"); }
+            };
+
+            const isAnimalSpecies = (specie) => {
+                const animalNames = [
+                    'animale', 'pet', 'cane', 'cani', 'gatto', 'gatti', 'lupo', 'lupi', 'orso', 'orsi', 'volpe', 'volpi',
+                    'coniglio', 'conigli', 'leone', 'leoni', 'tigre', 'tigri', 'puma', 'pume', 'leopardo', 'leopardi',
+                    'giaguaro', 'giaguari', 'scimmia', 'scimmie', 'gorilla', 'gorillae', 'babbuino', 'babbuini',
+                    'cervo', 'cervi', 'reno', 'reni', 'renna', 'renne', 'cavallo', 'cavalli', 'mucca', 'mucche',
+                    'pecora', 'pecore', 'maiale', 'maiali', 'capra', 'capre', 'gallina', 'galline', 'pollo', 'polli',
+                    'anatra', 'anatre', 'oca', 'oche', 'papera', 'paperi', 'cigno', 'cigni', 'falco', 'falchi',
+                    'aquila', 'aquile', 'gufo', 'gufi', 'corvo', 'corvi', 'piccione', 'piccioni', 'passero', 'passeri',
+                    'canarino', 'canarini', 'criceto', 'criceti', 'topo', 'topi', 'ratto', 'ratti', 'furetto', 'furetti',
+                    'tartaruga', 'tartarughe', 'lucertola', 'lucertole', 'serpente', 'serpenti', 'rana', 'rane', 'rospo', 'rospi',
+                    'coccodrillo', 'coccodrilli', 'alligatore', 'alligatori', 'delfino', 'delfini', 'balena', 'balene',
+                    'squalo', 'squali', 'pesce', 'pesci', 'medusa', 'meduse', 'polpo', 'polpi', 'granchio', 'granchi',
+                    'gambero', 'gamberi', 'cavalluccio marino', 'cavallucci marini', 'pinguino', 'pinguini', 'panda', 'panda',
+                    'koala', 'koala', 'scoiattolo', 'scoiattoli', 'elefante', 'elefanti', 'rinoceronte', 'rinoceronti',
+                    'ippopotamo', 'ippopotami', 'giraffa', 'giraffe', 'zebra', 'zebre', 'fennec', 'fennec', 'procione', 'procioni'
+                ];
+
+                if (!specie) return false;
+
+                const normalized = String(specie)
+                    .toLowerCase()
+                    .normalize('NFD')
+                    .replace(/[\u0300-\u036f]/g, '')
+                    .replace(/[^a-z\s]/g, ' ')
+                    .replace(/\s+/g, ' ')
+                    .trim();
+
+                if (!normalized) return false;
+
+                return animalNames.some(animal => normalized.includes(animal));
+            };
+
+            const getMemberBirthday = user => user?.nascita || user?.Nascita || user?.dataNascita || user?.compleanno || '';
+
             const getFullMemberData = (targetStr) => {
                 if (!targetStr) return { nome: "Nessuno", eta: "N/A", sesso: "N/A", money: 0 };
                 
@@ -97,52 +392,148 @@
                 const u = citizens.find(c => String(c.id) === cleanId || String(c.id) === altId);
 
                 if (u) {
-                    const [g, m, a] = (u.nascita || '01/01/2000').split('/').map(Number);
-                    const oggi = new Date();
-                    let eta = oggi.getFullYear() - a;
-                    if (oggi.getMonth() + 1 < m || (oggi.getMonth() + 1 === m && oggi.getDate() < g)) eta--;
+                    const birthday = getMemberBirthday(u);
+                    const eta = birthday ? calcolaEta(birthday) : null;
+                    
+                    let scuola = null;
+                    if (!isAnimalSpecies(u.specie)) {
+                        if (eta >= 6 && eta <= 10) scuola = `${eta - 5}° Elementare`;
+                        else if (eta >= 11 && eta <= 13) scuola = `${eta - 10}° Media`;
+                        else if (eta >= 14 && eta <= 18) scuola = `${eta - 13}° Superiore`;
+                    }
                     
                     return { 
                         ...u, 
                         nome: `${u.nome} ${u.cognome || ''}`.trim(), 
                         eta, 
+                        scuola,
                         sesso: u.sesso || "N/D", 
+                        specie: u.specie || "",
                         money: u.money || 0 
                     };
                 }
                 
-                return { nome: targetStr, eta: "N/A", sesso: "N/A", money: 0 };
+                return { nome: targetStr, eta: "N/A", sesso: "N/A", specie: "", money: 0 };
+            };
+
+            const getMemberAffiliations = (memberId) => {
+                if (!memberId) return { schools: [], workplaces: [] };
+                const normalizeMemberId = value => String(value || '').replace(/[<@!>]/g, '').trim().toLowerCase().replace(/ /g, "_");
+                const id = normalizeMemberId(memberId);
+                const matchesId = value => normalizeMemberId(value) === id;
+
+                const schools = buildings
+                    .filter(building => {
+                        const isSchool = building.tipo?.startsWith('scuola') ||
+                            building.id.toLowerCase().includes('scuola') ||
+                            building.id.toLowerCase().includes('liceo');
+                        return isSchool && (schoolEnrollments[building.id] || []).some(student => matchesId(student.id));
+                    })
+                    .map(building => ({
+                        id: building.id,
+                        nome: building.nome || building.id,
+                        enrollment: (schoolEnrollments[building.id] || []).find(student => matchesId(student.id))
+                    }));
+
+                const workplaces = shops
+                    .filter(shop => (shop.dipendenti || []).some(employeeId => matchesId(employeeId)))
+                    .map(shop => ({ id: shop.id, nome: shop.nome || shop.id, type: shop.type || 'Attività' }));
+
+                return { schools, workplaces };
+            };
+
+            const formatBirthday = birthday => {
+                if (!birthday) return 'Non indicato';
+                const match = String(birthday).match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+                if (match) return `${match[1].padStart(2, '0')}/${match[2].padStart(2, '0')}/${match[3]}`;
+                const date = new Date(birthday);
+                return Number.isNaN(date.getTime()) ? String(birthday) : date.toLocaleDateString('it-IT');
             };
 
             return (
                 <div className="flex h-screen overflow-hidden text-slate-900 font-sans">
-                    <aside className="w-64 bg-[#0F172A] text-slate-400 p-6 flex flex-col shadow-2xl shrink-0">
-                        <div className="flex items-center gap-3 mb-12 text-white"><Icon name="shield" /><span className="font-black text-xl tracking-tighter uppercase italic">Roleplay dashboard</span></div>
-                        <nav className="space-y-2">
-                            <NavItem active={view === 'citizens'} icon="users" label="Cittadini" onClick={() => setView('citizens')} />
-                            <NavItem active={view === 'shops'} icon="store" label="Lavori & Staff" onClick={() => setView('shops')} />
-                            <NavItem active={view === 'families'} icon="castle" label="Famiglie" onClick={() => setView('families')} />
-                        </nav>
-                    </aside>
+<aside className="w-64 bg-[#0F172A] text-slate-400 p-6 flex flex-col shadow-2xl shrink-0">
+    <div className="flex items-center gap-3 mb-12 text-white">
+        <Icon name="shield" />
+        <span className="font-black text-xl tracking-tighter uppercase italic">Roleplay dashboard</span>
+    </div>
+    <nav className="space-y-2">
+        <NavItem active={view === 'citizens'} icon="users" label="Cittadini" onClick={() => setView('citizens')} />
+        <NavItem active={view === 'shops'} icon="store" label="Attività" onClick={() => setView('shops')} />
+        <NavItem active={view === 'jobs'} icon="briefcase" label="Registro Lavori" onClick={() => setView('jobs')} />
+        <NavItem active={view === 'families'} icon="castle" label="Famiglie" onClick={() => setView('families')} />
+        <NavItem active={view === 'buildings'} icon="map-pin" label="Mappa" onClick={() => setView('buildings')} />
+        {/* NUOVA VOCE DEDICATA */}
+        <NavItem active={view === 'school'} icon="graduation-cap" label="Gestione Scuola" onClick={() => setView('school')} />
+    </nav>
+</aside>
 
                     <main className="flex-1 p-8 overflow-auto">
                         <h2 className="text-3xl font-black mb-8 uppercase tracking-tighter italic">{view}</h2>
                         
                         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                            {view === 'citizens' && citizens.map(c => (
-                                <div key={c.id} className="bg-white p-6 rounded-[2rem] border shadow-sm flex items-center gap-4 hover:border-blue-400 transition-all">
-                                    <Avatar user={c} />
-                                    <div className="flex-1 min-w-0">
-                                        <div className="flex justify-between items-start">
-                                            <h3 className="font-bold uppercase">{c.nome} {c.cognome}</h3>
-                                            <span className="font-black text-blue-600 text-[10px] ml-2 shrink-0">€{c.money || 0}</span>
-                                        </div>
-                                        <p className="text-[10px] text-slate-400 font-bold uppercase truncate">{c.lavoro || 'Cittadino'}</p>
+                            {view === 'citizens' && (
+                                <>
+                                                                        <div onClick={() => setSelectedItem({ type_modale: 'citizen', isNew: true, sesso: 'M', money: 0, lavoro: 'Disoccupato', nascita: '01/01/2000' })} className="bg-white p-6 rounded-[2rem] border-2 border-dashed border-slate-200 flex items-center justify-center gap-4 hover:border-blue-400 hover:bg-blue-50 transition-all cursor-pointer group">
+                                        <div className="p-3 bg-blue-100 text-blue-600 rounded-2xl group-hover:bg-blue-600 group-hover:text-white transition-colors"><Icon name="plus" /></div>
+                                        <span className="font-black uppercase text-sm text-slate-500 group-hover:text-blue-600">Nuovo Cittadino</span>
                                     </div>
-                                </div>
-                            ))}
+                                    {citizens.map(c => (
+                                        (() => {
+                                            const member = getFullMemberData(c.id);
+                                            const affiliations = getMemberAffiliations(c.id);
+                                            return (
+                                                <div key={c.id} onClick={() => setSelectedItem({ ...c, type_modale: 'citizen' })} className="bg-white p-5 rounded-[2rem] border border-slate-200 shadow-sm flex items-start gap-4 hover:border-blue-400 hover:shadow-lg hover:shadow-blue-100/60 transition-all cursor-pointer group">
+                                                    <Avatar user={c} />
+                                                    <div className="flex-1 min-w-0">
+                                                        <div className="flex justify-between items-start gap-2">
+                                                            <h3 className="font-black uppercase truncate">{c.nome} {c.cognome}</h3>
+                                                            <span className="font-black text-blue-600 text-xs shrink-0">€{c.money || 0}</span>
+                                                        </div>
+                                                        <p className="text-[10px] text-slate-400 font-bold uppercase truncate mt-1">{c.lavoro || 'Cittadino'}</p>
+                                                        <div className="grid grid-cols-3 gap-2 mt-4 pt-3 border-t border-slate-100">
+                                                            <div>
+                                                                <p className="text-[8px] font-black text-slate-400 uppercase tracking-wider">Compleanno</p>
+                                                                <p className="text-[10px] font-bold text-slate-700 mt-1">{formatBirthday(getMemberBirthday(c))}</p>
+                                                            </div>
+                                                            <div>
+                                                                <p className="text-[8px] font-black text-slate-400 uppercase tracking-wider">Età</p>
+                                                                <p className="text-[10px] font-bold text-slate-700 mt-1">{Number.isFinite(member.eta) ? `${member.eta} anni` : 'N/D'}</p>
+                                                            </div>
+                                                            <div>
+                                                                <p className="text-[8px] font-black text-slate-400 uppercase tracking-wider">Sesso</p>
+                                                                <p className="text-[10px] font-bold text-slate-700 mt-1">{c.sesso || 'N/D'}</p>
+                                                            </div>
+                                                        </div>
+                                                        {(affiliations.schools.length > 0 || affiliations.workplaces.length > 0) && (
+                                                            <div className="mt-3 flex flex-wrap gap-1.5">
+                                                                {affiliations.workplaces.map(workplace => (
+                                                                    <span key={`work-${workplace.id}`} className="px-2 py-1 rounded-lg bg-emerald-50 text-emerald-700 text-[8px] font-black uppercase truncate">
+                                                                        {workplace.nome}
+                                                                    </span>
+                                                                ))}
+                                                                {affiliations.schools.map(school => (
+                                                                    <span key={`school-${school.id}`} className="px-2 py-1 rounded-lg bg-indigo-50 text-indigo-700 text-[8px] font-black uppercase truncate">
+                                                                        {school.nome}{school.enrollment.classe ? ` · ${school.enrollment.classe}` : ''}
+                                                                    </span>
+                                                                ))}
+                                                            </div>
+                                                        )}
+                                                    </div>
+                                                </div>
+                                            );
+                                        })()
+                                    ))}
+                                </>
+                            )}
 
-                            {view === 'shops' && shops.map(s => (
+                            {view === 'shops' && (
+                                <>
+                                    <div onClick={() => setSelectedItem({ type_modale: 'shop', isNew: true, type: 'Negozio', owner_id: '', dipendenti: [] })} className="bg-white p-6 rounded-[2.5rem] border-2 border-dashed border-slate-200 flex items-center justify-center gap-4 hover:border-emerald-400 hover:bg-emerald-50 transition-all cursor-pointer group">
+                                        <div className="p-3 bg-emerald-100 text-emerald-600 rounded-2xl group-hover:bg-emerald-600 group-hover:text-white transition-colors"><Icon name="plus" /></div>
+                                        <span className="font-black uppercase text-sm text-slate-500 group-hover:text-emerald-600">Nuova Attività</span>
+                                    </div>
+                                    {shops.map(s => (
                                 <div key={s.id} onClick={() => setSelectedItem({ ...s, type_modale: 'shop' })} className="bg-white p-6 rounded-[2.5rem] border shadow-sm hover:border-emerald-400 transition-all cursor-pointer group">
                                     <div className="flex justify-between mb-4">
                                         <div className="p-3 bg-slate-100 rounded-2xl group-hover:bg-emerald-500 group-hover:text-white transition-colors"><Icon name="briefcase" /></div>
@@ -153,8 +544,336 @@
                                     <div className="mt-4 text-[10px] font-black text-emerald-600 uppercase flex items-center gap-1">Vedi Organigramma <Icon name="chevron-right" size={14}/></div>
                                 </div>
                             ))}
+                                </>
+                            )}
 
-                            {view === 'families' && families.map(f => (
+                            {view === 'jobs' && (
+                                <>
+                                    <div onClick={() => setSelectedItem({ type_modale: 'job', isNew: true })} className="bg-white p-6 rounded-[2rem] border-2 border-dashed border-slate-200 flex items-center justify-center gap-4 hover:border-emerald-400 hover:bg-emerald-50 transition-all cursor-pointer group">
+                                        <div className="p-3 bg-emerald-100 text-emerald-600 rounded-2xl group-hover:bg-emerald-600 group-hover:text-white transition-colors"><Icon name="plus" /></div>
+                                        <span className="font-black uppercase text-sm text-slate-500 group-hover:text-emerald-600">Nuovo Lavoro</span>
+                                    </div>
+                                    {jobs.map(j => (
+                                        <div key={j.id} onClick={() => setSelectedItem({ ...j, type_modale: 'job' })} className="bg-white p-6 rounded-[2.5rem] border shadow-sm hover:border-emerald-400 transition-all cursor-pointer group">
+                                            <div className="flex justify-between mb-4">
+                                                <div className="p-3 bg-emerald-50 text-emerald-600 rounded-2xl"><Icon name="briefcase" /></div>
+                                                <span className="text-[10px] font-black bg-emerald-100 px-3 py-1 rounded-full text-emerald-600 uppercase">{j.stipendio}€</span>
+                                            </div>
+                                            <h3 className="font-black uppercase text-lg">{j.id}</h3>
+                                            <p className="text-[10px] text-slate-400 font-bold uppercase truncate">{j.descrizione || 'Nessuna descrizione'}</p>
+                                        </div>
+                                    ))}
+                                </>
+                            )}
+
+                                                        {view === 'buildings' && (
+                                <>
+                                    <div onClick={() => setSelectedItem({ type_modale: 'building', isNew: true, stanze: [], tipo: 'casa' })} className="bg-white p-6 rounded-[2rem] border-2 border-dashed border-slate-200 flex items-center justify-center gap-4 hover:border-indigo-400 hover:bg-indigo-50 transition-all cursor-pointer group">
+                                        <div className="p-3 bg-indigo-100 text-indigo-600 rounded-2xl group-hover:bg-indigo-600 group-hover:text-white transition-colors"><Icon name="plus" /></div>
+                                        <span class="font-black uppercase text-sm text-slate-500 group-hover:text-indigo-600">Nuovo Luogo</span>
+                                    </div>
+                                    {buildings.map(b => (
+                                        <div key={b.id} onClick={() => setSelectedItem({ ...b, type_modale: 'building' })} className="bg-white p-6 rounded-[2rem] border shadow-sm flex items-center gap-4 hover:border-indigo-400 transition-all cursor-pointer group">
+                                            <div className="p-3 bg-slate-100 rounded-2xl"><Icon name="map-pin" /></div>
+                                            <div className="flex-1">
+                                                <h3 className="font-bold uppercase">{b.nome}</h3>
+                                                <p className="text-[10px] text-slate-400 font-bold uppercase italic">{b.tipo}</p>
+                                            </div>
+                                        </div>
+                                    ))}
+                                </>
+                            )}
+
+{view === 'school' && (
+    <div className="col-span-full w-full max-w-7xl mx-auto space-y-8 p-4">
+        
+        {/* SEZIONE 1: CREA NUOVA SCUOLA */}
+        <div className="bg-white p-6 rounded-[2.5rem] border shadow-sm flex items-center gap-4">
+            <input 
+                type="text" 
+                placeholder="Nome Nuovo Istituto (es. Liceo Scientifico Volta)" 
+                value={newSchoolName} 
+                onChange={e => setNewSchoolName(e.target.value)} 
+                className="flex-1 p-4 bg-slate-50 rounded-2xl border text-xs font-bold uppercase" 
+            />
+            <button 
+                onClick={handleCreateSchool} 
+                className="px-6 py-4 bg-indigo-600 text-white rounded-2xl font-black text-xs uppercase hover:bg-indigo-700 transition-colors shadow-md">
+                + Crea Scuola
+            </button>
+        </div>
+
+        {/* SEZIONE 2: GRIGLIA DELLE SCUOLE ESISTENTI */}
+        <div>
+            <h3 className="font-black text-sm uppercase text-slate-400 mb-4 italic">Seleziona un Istituto Scolastico:</h3>
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                {buildings.filter(b => b.tipo?.startsWith('scuola') || b.id.toLowerCase().includes('scuola') || b.id.toLowerCase().includes('liceo')).map(s => (
+                    <div 
+                        key={s.id} 
+                        onClick={() => setSelectedSchool(s)} 
+                        className={`p-6 rounded-[2rem] border shadow-sm flex items-center justify-between cursor-pointer transition-all ${selectedSchool?.id === s.id ? 'border-2 border-indigo-600 bg-indigo-50/50' : 'bg-white hover:border-indigo-300'}`}>
+                        <div className="flex items-center gap-4">
+                            <div className="p-3 bg-indigo-100 text-indigo-600 rounded-2xl"><Icon name="graduation-cap" /></div>
+                            <div>
+                                <h3 className="font-black uppercase text-sm">{s.nome || s.id}</h3>
+                                <p className="text-[10px] text-slate-400 font-bold uppercase">{s.tipo || 'Edificio Scolastico'}</p>
+                            </div>
+                        </div>
+                        <Icon name="chevron-right" size={18} className="text-slate-400" />
+                    </div>
+                ))}
+            </div>
+        </div>
+
+        {/* SEZIONE 3: GESTIONE INTERNA DELLA SCUOLA SELEZIONATA */}
+        {selectedSchool ? (
+            <div className="bg-slate-50 p-8 rounded-[3rem] border border-slate-200 space-y-6">
+                <div className="flex justify-between items-center border-b pb-4">
+                    <div>
+                        <span className="text-[10px] font-black uppercase tracking-widest text-indigo-600">Gestione Istituto ({selectedSchool.tipo || 'Scuola'})</span>
+                        <h2 className="text-2xl font-black uppercase italic">{selectedSchool.nome || selectedSchool.id}</h2>
+                    </div>
+                    
+                    {/* NAVIGAZIONE TAB */}
+                    <div className="flex gap-2 bg-white p-1.5 rounded-2xl border">
+                        <button 
+                            onClick={() => setSchoolTab('studenti')} 
+                            className={`px-4 py-2 rounded-xl font-black text-xs uppercase transition-all ${schoolTab === 'studenti' ? 'bg-indigo-600 text-white' : 'text-slate-500'}`}>
+                            Studenti ({schoolStudents.length})
+                        </button>
+                        <button 
+                            onClick={() => setSchoolTab('staff')} 
+                            className={`px-4 py-2 rounded-xl font-black text-xs uppercase transition-all ${schoolTab === 'staff' ? 'bg-indigo-600 text-white' : 'text-slate-500'}`}>
+                            Staff ({schoolStaff.length})
+                        </button>
+                        <button 
+                            onClick={() => setSchoolTab('sfondo')} 
+                            className={`px-4 py-2 rounded-xl font-black text-xs uppercase transition-all ${schoolTab === 'sfondo' ? 'bg-indigo-600 text-white' : 'text-slate-500'}`}>
+                            Sfondo ({schoolBackgroundNpcs.length})
+                        </button>
+                    </div>
+                </div>
+
+                {/* TAB STUDENTI */}
+                {schoolTab === 'studenti' && (
+                    <div className="space-y-6">
+                        <div className="bg-white p-4 rounded-2xl border flex items-center gap-3">
+                            {/* SELECT DINAMICA FILTRATA PER ETÀ E TIPO DI SCUOLA */}
+                            <select id="select-studente-scuola" className="flex-1 p-3 bg-slate-50 rounded-xl border text-xs font-bold uppercase">
+                                <option value="">-- Seleziona Cittadino Idoneo --</option>
+                                {getCandidatiIdonei(selectedSchool, utentiCache || citizens).map(c => {
+                                    const eta = calcolaEta(c.Nascita || c.nascita || c.dataNascita || c.compleanno || c.eta);
+                                    return (
+                                        <option key={c.id} value={c.id}>
+                                            {c.nome} {c.cognome || ''} — Anni: {eta ?? 'N/D'}
+                                        </option>
+                                    );
+                                })}
+                            </select>
+
+                            {/* Input classe */}
+                            <input 
+                                type="text" 
+                                placeholder="Classe (es. 1A, 3B)" 
+                                value={selectedClass} 
+                                onChange={e => setSelectedClass(e.target.value)} 
+                                className="w-36 p-3 bg-slate-50 rounded-xl border text-xs font-bold uppercase"
+                            />
+
+                            <button 
+                                onClick={() => {
+                                    const val = document.getElementById('select-studente-scuola').value;
+                                    if (val) handleAddStudent(val);
+                                    else alert("Seleziona prima uno studente!");
+                                }} 
+                                className="px-5 py-3 bg-indigo-600 text-white rounded-xl font-black text-xs uppercase hover:bg-indigo-700 transition-colors shrink-0">
+                                Iscrivi
+                            </button>
+                        </div>
+
+                        {/* Lista degli Studenti */}
+                        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                            {schoolStudents.map(st => {
+                                const dataStudente = getFullMemberData(st.id);
+                                return (
+                                    <div key={st.id} className="bg-white p-4 rounded-2xl border flex items-center justify-between shadow-sm">
+                                        <div className="flex items-center gap-3">
+                                            <Avatar user={dataStudente} />
+                                            <div>
+                                                <h4 className="font-bold uppercase text-xs">{dataStudente.nome}</h4>
+                                                <div className="flex items-center gap-2 mt-0.5">
+                                                    {st.classe && (
+                                                        <span className="px-2 py-0.5 bg-indigo-100 text-indigo-700 rounded-lg text-[10px] font-black uppercase">
+                                                            Classe {st.classe}
+                                                        </span>
+                                                    )}
+                                                    <span className="text-[10px] text-slate-400 font-bold uppercase">
+                                                        {dataStudente.scuola || 'Studente'}
+                                                    </span>
+                                                </div>
+                                            </div>
+                                        </div>
+                                        <button onClick={() => handleRemoveStudent(st.id)} className="p-2 text-red-400 hover:text-red-600 transition-colors">
+                                            <Icon name="trash" size={16} />
+                                        </button>
+                                    </div>
+                                );
+                            })}
+                        </div>
+                    </div>
+                )}
+
+                {/* TAB STAFF (COMPRESO CAMPO SESSO) */}
+                {schoolTab === 'staff' && (
+                    <div className="space-y-6">
+                        <div className="bg-white p-4 rounded-2xl border flex flex-wrap lg:flex-nowrap gap-3">
+                            <input 
+                                type="text" 
+                                placeholder="Nome NPC Docente" 
+                                value={newNpcName} 
+                                onChange={e => setNewNpcName(e.target.value)} 
+                                className="flex-1 p-3 bg-slate-50 rounded-xl border text-xs font-bold uppercase min-w-[150px]" 
+                            />
+                            <input 
+                                type="text" 
+                                placeholder="Materia / Ruolo" 
+                                value={newNpcRole} 
+                                onChange={e => setNewNpcRole(e.target.value)} 
+                                className="flex-1 p-3 bg-slate-50 rounded-xl border text-xs font-bold uppercase min-w-[150px]" 
+                            />
+                            
+                            {/* SELECT SESSO STAFF */}
+                            <select 
+                                value={npcSesso} 
+                                onChange={e => setNpcSesso(e.target.value)}
+                                className="p-3 bg-slate-50 rounded-xl border text-xs font-bold uppercase text-slate-700">
+                                <option value="M">Maschio (M)</option>
+                                <option value="F">Femmina (F)</option>
+                                <option value="X">Altro / N/D</option>
+                            </select>
+
+                            <button onClick={() => handleAddNPC('staff')} className="px-5 py-3 bg-indigo-600 text-white rounded-xl font-black text-xs uppercase hover:bg-indigo-700 transition-colors shrink-0">
+                                + Aggiungi Staff
+                            </button>
+                        </div>
+
+                        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                            {schoolStaff.map(npc => (
+                                <div key={npc.id} className="bg-white p-4 rounded-2xl border flex items-center justify-between shadow-sm">
+                                    <div>
+                                        <div className="flex items-center gap-2">
+                                            <h4 className="font-bold uppercase text-xs">{npc.nome}</h4>
+                                            {npc.sesso && (
+                                                <span className="px-1.5 py-0.5 bg-slate-100 text-slate-500 rounded font-black text-[9px]">
+                                                    {npc.sesso}
+                                                </span>
+                                            )}
+                                        </div>
+                                        <p className="text-[10px] text-indigo-600 font-black uppercase mt-0.5">{npc.ruolo}</p>
+                                    </div>
+                                    <button onClick={() => handleDeleteNPC('staff', npc.id)} className="p-2 text-red-400 hover:text-red-600 transition-colors">
+                                        <Icon name="trash" size={16} />
+                                    </button>
+                                </div>
+                            ))}
+                        </div>
+                    </div>
+                )}
+
+                {/* TAB SFONDO (COMPRESO CAMPO CLASSE E SESSO) */}
+                {schoolTab === 'sfondo' && (
+                    <div className="space-y-6">
+                        <div className="bg-white p-4 rounded-2xl border flex flex-wrap lg:flex-nowrap gap-3">
+                            <input 
+                                type="text" 
+                                placeholder="Nome Compagno NPC" 
+                                value={newNpcName} 
+                                onChange={e => setNewNpcName(e.target.value)} 
+                                className="flex-1 p-3 bg-slate-50 rounded-xl border text-xs font-bold uppercase min-w-[150px]" 
+                            />
+                            <input 
+                                type="text" 
+                                placeholder="Classe (es. 5°A)" 
+                                value={newNpcClass} 
+                                onChange={e => setNewNpcClass(e.target.value)} 
+                                className="w-32 p-3 bg-slate-50 rounded-xl border text-xs font-bold uppercase" 
+                            />
+
+                            {/* SELECT SESSO SFONDO */}
+                            <select 
+                                value={npcSesso} 
+                                onChange={e => setNpcSesso(e.target.value)}
+                                className="p-3 bg-slate-50 rounded-xl border text-xs font-bold uppercase text-slate-700">
+                                <option value="M">Maschio (M)</option>
+                                <option value="F">Femmina (F)</option>
+                                <option value="X">Altro / N/D</option>
+                            </select>
+
+                            <button 
+                                onClick={() => handleAddNPC('sfondo')} 
+                                className="px-5 py-3 bg-indigo-600 text-white rounded-xl font-black text-xs uppercase hover:bg-indigo-700 transition-colors shrink-0">
+                                + Aggiungi Sfondo
+                            </button>
+                        </div>
+
+                        {/* Lista Compagni NPC */}
+                        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                            {schoolBackgroundNpcs.map(npc => (
+                                <div key={npc.id} className="bg-white p-4 rounded-2xl border flex items-center justify-between shadow-sm">
+                                    <div className="flex items-center gap-3">
+                                        <div className="p-3 bg-slate-100 text-slate-600 rounded-xl font-black">
+                                            <Icon name="users" size={18} />
+                                        </div>
+                                        <div>
+                                            <div className="flex items-center gap-2">
+                                                <h4 className="font-bold uppercase text-xs">{npc.nome}</h4>
+                                                {npc.sesso && (
+                                                    <span className="px-1.5 py-0.5 bg-slate-100 text-slate-500 rounded font-black text-[9px]">
+                                                        {npc.sesso}
+                                                    </span>
+                                                )}
+                                            </div>
+                                            <div className="flex items-center gap-2 mt-0.5">
+                                                {npc.classe ? (
+                                                    <span className="px-2 py-0.5 bg-indigo-100 text-indigo-700 rounded-lg text-[10px] font-black uppercase">
+                                                        Classe {npc.classe}
+                                                    </span>
+                                                ) : (
+                                                    <span className="text-[10px] text-slate-400 font-bold uppercase">
+                                                        {npc.ruolo || 'Studente Sfondo'}
+                                                    </span>
+                                                )}
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <button 
+                                        onClick={() => handleDeleteNPC('sfondo', npc.id)} 
+                                        className="p-2 text-red-400 hover:text-red-600 transition-colors">
+                                        <Icon name="trash" size={16} />
+                                    </button>
+                                </div>
+                            ))}
+                        </div>
+                    </div>
+                )}
+
+            </div>
+        ) : (
+            <div className="p-8 text-center text-slate-400 font-bold uppercase text-xs border-2 border-dashed rounded-[2.5rem]">
+                Seleziona una scuola qui sopra per gestirne gli iscritti e lo staff
+            </div>
+        )}
+
+    </div>
+)}
+
+                                                        {view === 'families' && (
+                                <>
+                                    <div onClick={() => setSelectedItem({ type_modale: 'family', isNew: true, nome: '', padre: '', madre: '', figli: {}, pets: [] })} className="bg-white p-6 rounded-[2.5rem] border-2 border-dashed border-slate-200 flex items-center justify-center gap-4 hover:border-blue-400 hover:bg-blue-50 transition-all cursor-pointer group">
+                                        <div className="p-3 bg-blue-100 text-blue-600 rounded-2xl group-hover:bg-blue-600 group-hover:text-white transition-colors"><Icon name="plus" /></div>
+                                        <span className="font-black uppercase text-sm text-slate-500 group-hover:text-blue-600">Nuova Famiglia</span>
+                                    </div>
+                                    {families.map(f => (
                                 <div key={f.id} onClick={() => setSelectedItem({ ...f, type_modale: 'family' })} className="bg-white p-6 rounded-[2.5rem] border shadow-sm hover:border-blue-400 transition-all cursor-pointer group">
                                     <div className="flex justify-between mb-4">
                                         <div className="p-3 bg-amber-50 text-amber-600 rounded-2xl group-hover:bg-amber-500 group-hover:text-white transition-colors"><Icon name="crown" /></div>
@@ -165,183 +884,912 @@
                                     <div className="mt-4 text-[10px] font-black text-blue-500 uppercase flex items-center gap-1">Info Casata <Icon name="chevron-right" size={14}/></div>
                                 </div>
                             ))}
+                                </>
+                            )}
                         </div>
                     </main>
 
                     {selectedItem && (
-                        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4" onClick={() => setSelectedItem(null)}>
-                            <div className="bg-white w-full max-w-xl rounded-[3rem] overflow-hidden shadow-2xl" onClick={e => e.stopPropagation()}>
-                                <div className={`h-3 ${selectedItem.type_modale === 'shop' ? 'bg-[#1abc9c]' : 'bg-blue-500'}`}></div>
-                                <div className="p-10">
+                        <div className={selectedItem.type_modale === 'citizen' ? "fixed inset-0 bg-slate-100 z-50 overflow-y-auto" : "fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4"} onClick={() => setSelectedItem(null)}>
+                            <div className={selectedItem.type_modale === 'citizen' ? "bg-white w-full min-h-full shadow-2xl" : "bg-white w-full max-w-xl rounded-[3rem] max-h-[90vh] overflow-y-auto shadow-2xl scrollbar-hide"} onClick={e => e.stopPropagation()}>
+                                <div className={`${selectedItem.type_modale === 'citizen' ? 'h-2' : 'h-3'} ${selectedItem.type_modale === 'shop' ? 'bg-[#1abc9c]' : selectedItem.type_modale === 'job' ? 'bg-emerald-500' : 'bg-blue-500'}`}></div>
+                                <div className={selectedItem.type_modale === 'citizen' ? "p-5 sm:p-8 lg:p-10 max-w-[1600px] mx-auto" : "p-10"}>
                                     <div className="flex justify-between items-start mb-8">
-                                        <h3 className="text-3xl font-black uppercase italic">{selectedItem.nome || selectedItem.id}</h3>
-                                        <button onClick={() => setSelectedItem(null)} className="p-2 bg-slate-100 rounded-full hover:bg-red-50 text-slate-400 hover:text-red-500 transition-colors">
+                                        <div>
+                                            <p className="text-[10px] font-black uppercase tracking-[0.25em] text-blue-500 mb-2">{selectedItem.type_modale === 'citizen' ? (selectedItem.isNew ? 'Nuovo personaggio' : 'Scheda personaggio') : ''}</p>
+                                            <h3 className="text-3xl sm:text-4xl font-black uppercase italic">{selectedItem.nome || selectedItem.id || 'Nuovo Cittadino'}</h3>
+                                            {selectedItem.type_modale === 'citizen' && !selectedItem.isNew && <p className="text-xs text-slate-400 font-bold mt-2">ID: {selectedItem.id}</p>}
+                                        </div>
+                                        <button onClick={() => setSelectedItem(null)} className="p-3 bg-slate-100 rounded-full hover:bg-red-50 text-slate-400 hover:text-red-500 transition-colors">
                                             <Icon name="x" />
                                         </button>
                                     </div>
 
-{/* CONTENUTO MODALE SHOP */}
-{selectedItem.type_modale === 'shop' && (
-    <div className="space-y-6">
-        <div className="bg-slate-50 p-6 rounded-3xl flex items-center gap-4">
-            <Avatar user={getFullMemberData(selectedItem.owner_id)} size="lg" />
-            <div>
-                <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Proprietario</p>
-                <p className="font-black text-xl uppercase italic">{getFullMemberData(selectedItem.owner_id).nome}</p>
-            </div>
-        </div>
-
-        {/* SEZIONE PRODOTTI / CATALOGO (Lettura da sottocollezione items) */}
-        <div>
-            <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-3 px-2">📦 Catalogo Prodotti</h4>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                {/* Usiamo lo stato shopItems che viene caricato via useEffect */}
-                {Object.entries(shopItems || {}).length > 0 ? (
-                    Object.entries(shopItems).map(([nomeProd, dati]) => {
-                        let icon = "package";
-                        const n = nomeProd.toLowerCase();
-                        if (n.includes("cibo") || n.includes("pizza") || n.includes("panino")) icon = "utensils";
-                        else if (n.includes("vestito") || n.includes("maglia") || n.includes("scarpe")) icon = "shirt";
-                        else if (n.includes("trucco") || n.includes("rossetto") || n.includes("crema")) icon = "sparkles";
-                        else if (n.includes("drink") || n.includes("birra") || n.includes("acqua")) icon = "glass-water";
-
-                        return (
-                            <div key={nomeProd} className="p-3 bg-white border border-slate-100 rounded-2xl flex items-center justify-between shadow-sm">
-                                <div className="flex items-center gap-3">
-                                    <div className="p-2 bg-slate-50 rounded-xl text-slate-400">
-                                        <Icon name={icon} className="w-4 h-4" />
-                                    </div>
-                                    <div>
-                                        <p className="font-bold text-xs uppercase">{nomeProd}</p>
-                                        <div className="flex gap-2">
-                                            <p className="text-[9px] text-slate-400 font-bold uppercase">{dati.categoria || 'Articolo'}</p>
-                                            {dati.stock !== undefined && (
-                                                <p className="text-[9px] text-blue-500 font-bold uppercase">Disponibili: {dati.stock}</p>
-                                            )}
-                                        </div>
-                                    </div>
-                                </div>
-                                <div className="text-right">
-                                    <p className="text-xs font-black text-emerald-600">€{dati.prezzo || 0}</p>
-                                </div>
-                            </div>
-                        );
-                    })
-                ) : (
-                    <div className="col-span-2 py-8 text-center bg-slate-50 rounded-3xl border border-dashed border-slate-200">
-                         <p className="text-[10px] text-slate-400 uppercase font-black">Scaffali vuoti o in caricamento...</p>
+{/* CONTENUTO MODALE CITTADINO */}
+{selectedItem.type_modale === 'citizen' && (
+    <div className="grid grid-cols-1 xl:grid-cols-[280px_minmax(0,1fr)] gap-8">
+        <aside className="space-y-5">
+            <div className="bg-slate-50 border border-slate-200 rounded-[2rem] p-6 flex flex-col items-center">
+                <div className="relative group">
+                    <Avatar user={selectedItem} size="lg" />
+                    <label className="absolute inset-0 flex items-center justify-center bg-black/50 rounded-2xl opacity-0 group-hover:opacity-100 cursor-pointer transition-all border-2 border-white/20">
+                        <Icon name="camera" className="text-white" />
+                        <input type="file" accept="image/*" className="hidden" onChange={e => {
+                            const file = e.target.files[0];
+                            if (file) {
+                                const reader = new FileReader();
+                                reader.onloadend = () => setCropImage(reader.result);
+                                reader.readAsDataURL(file);
+                            }
+                        }} />
+                    </label>
+                </div>
+                <p className="text-[9px] font-black text-slate-400 mt-3 uppercase text-center">Clicca sulla foto per caricarne una nuova</p>
+                <div className="w-full mt-5">
+                    <label className="text-[9px] font-black uppercase text-slate-400 ml-1">URL immagine</label>
+                    <input type="text" placeholder="https://..." className="w-full text-xs p-3 border rounded-xl bg-white mt-1"
+                        value={selectedItem.avatar || ''} onChange={e => setSelectedItem({...selectedItem, avatar: e.target.value})} />
+                </div>
+                <div className="w-full grid grid-cols-3 gap-2 mt-5 pt-5 border-t border-slate-200 text-center">
+                    <div>
+                        <p className="text-[8px] font-black uppercase text-slate-400">Compleanno</p>
+                        <p className="text-[10px] font-bold text-slate-700 mt-1">{formatBirthday(getMemberBirthday(selectedItem))}</p>
                     </div>
-                )}
+                    <div>
+                        <p className="text-[8px] font-black uppercase text-slate-400">Età</p>
+                        <p className="text-[10px] font-bold text-slate-700 mt-1">{Number.isFinite(calcolaEta(getMemberBirthday(selectedItem))) ? `${calcolaEta(getMemberBirthday(selectedItem))} anni` : 'N/D'}</p>
+                    </div>
+                    <div>
+                        <p className="text-[8px] font-black uppercase text-slate-400">Sesso</p>
+                        <p className="text-[10px] font-bold text-slate-700 mt-1">{selectedItem.sesso || 'N/D'}</p>
+                    </div>
+                </div>
             </div>
-        </div>
+            <nav className="bg-white border border-slate-200 rounded-[2rem] p-3 space-y-1">
+                <a href="#character-identity" className="block px-4 py-3 rounded-xl text-xs font-black uppercase text-slate-600 hover:bg-blue-50 hover:text-blue-600">Identità e dati</a>
+                <a href="#character-affiliations" className="block px-4 py-3 rounded-xl text-xs font-black uppercase text-slate-600 hover:bg-blue-50 hover:text-blue-600">Scuola e attività</a>
+            </nav>
+        </aside>
 
-        {/* STAFF */}
-        <div>
-            <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-3 px-2">💼 Staff</h4>
-            <div className="space-y-2">
-                {(selectedItem.dipendenti || []).map(d_id => {
-                    const d = getFullMemberData(d_id);
-                    return (
-                        <div key={d_id} className="p-3 bg-white border border-slate-100 rounded-2xl flex items-center gap-3 shadow-sm">
-                            <Avatar user={d} />
-                            <span className="font-bold text-slate-700">{d.nome}</span>
+        <div className="space-y-8">
+            <section id="character-identity" className="bg-white border border-slate-200 rounded-[2rem] p-6 sm:p-8">
+                <div className="mb-6">
+                    <p className="text-[10px] font-black uppercase tracking-[0.2em] text-blue-500">Anagrafica</p>
+                    <h4 className="text-xl font-black uppercase mt-1">Identità e dati del personaggio</h4>
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div className="md:col-span-2">
+                        <label className="text-[10px] font-black uppercase text-slate-400 ml-2">ID Discord / Sistema</label>
+                        <input disabled={!selectedItem.isNew} className="w-full p-3 bg-slate-50 border rounded-2xl font-bold disabled:text-slate-400"
+                            value={selectedItem.id || ''} onChange={e => setSelectedItem({...selectedItem, id: e.target.value})} placeholder="es: 123456789" />
+                    </div>
+                    <div>
+                        <label className="text-[10px] font-black uppercase text-slate-400 ml-2">Nome</label>
+                        <input className="w-full p-3 bg-slate-50 border rounded-2xl font-bold" value={selectedItem.nome || ''} onChange={e => setSelectedItem({...selectedItem, nome: e.target.value})} />
+                    </div>
+                    <div>
+                        <label className="text-[10px] font-black uppercase text-slate-400 ml-2">Cognome</label>
+                        <input className="w-full p-3 bg-slate-50 border rounded-2xl font-bold" value={selectedItem.cognome || ''} onChange={e => setSelectedItem({...selectedItem, cognome: e.target.value})} />
+                    </div>
+                    <div>
+                        <label className="text-[10px] font-black uppercase text-slate-400 ml-2">Compleanno (GG/MM/AAAA)</label>
+                        <input className="w-full p-3 bg-slate-50 border rounded-2xl font-bold" value={selectedItem.nascita || selectedItem.Nascita || selectedItem.dataNascita || selectedItem.compleanno || ''} onChange={e => setSelectedItem({...selectedItem, nascita: e.target.value})} placeholder="GG/MM/AAAA" />
+                    </div>
+                    <div>
+                        <label className="text-[10px] font-black uppercase text-slate-400 ml-2">Sesso</label>
+                        <select className="w-full p-3 bg-slate-50 border rounded-2xl font-bold" value={selectedItem.sesso || 'M'} onChange={e => setSelectedItem({...selectedItem, sesso: e.target.value})}>
+                            <option value="M">Maschio</option>
+                            <option value="F">Femmina</option>
+                        </select>
+                    </div>
+                    <div className="md:col-span-2">
+                        <label className="text-[10px] font-black uppercase text-slate-400 ml-2">Specie (per animali/NPC)</label>
+                        <input className="w-full p-3 bg-slate-50 border rounded-2xl font-bold" placeholder="es: Cane, Gatto, Criceto..."
+                            value={selectedItem.specie || ''} onChange={e => setSelectedItem({...selectedItem, specie: e.target.value})} />
+                    </div>
+                </div>
+            </section>
+
+            <section className="bg-white border border-slate-200 rounded-[2rem] p-6 sm:p-8">
+                <div className="mb-6">
+                    <p className="text-[10px] font-black uppercase tracking-[0.2em] text-emerald-500">Gestione RP</p>
+                    <h4 className="text-xl font-black uppercase mt-1">Lavoro e patrimonio</h4>
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div>
+                        <label className="text-[10px] font-black uppercase text-slate-400 ml-2">Lavoro / Studio</label>
+                        <input className="w-full p-3 bg-slate-50 border rounded-2xl font-bold" value={selectedItem.lavoro || ''}
+                            onChange={e => setSelectedItem({...selectedItem, lavoro: e.target.value})} placeholder="es: Disoccupato" />
+                    </div>
+                    <div>
+                        <label className="text-[10px] font-black uppercase text-slate-400 ml-2">Soldi (€)</label>
+                        <input type="number" className="w-full p-3 bg-slate-50 border rounded-2xl font-bold text-emerald-600" value={selectedItem.money ?? 0}
+                            onChange={e => setSelectedItem({...selectedItem, money: Number(e.target.value)})} />
+                    </div>
+                </div>
+            </section>
+
+            {(() => {
+                const affiliations = getMemberAffiliations(selectedItem.id);
+                return (
+                    <section id="character-affiliations" className="bg-white border border-slate-200 rounded-[2rem] p-6 sm:p-8">
+                        <div className="mb-6">
+                            <p className="text-[10px] font-black uppercase tracking-[0.2em] text-indigo-500">Collegamenti live</p>
+                            <h4 className="text-xl font-black uppercase mt-1">Scuola e attività</h4>
+                            <p className="text-xs text-slate-400 mt-2">Iscrizioni scolastiche e assunzioni lette dai registri collegati.</p>
                         </div>
-                    );
-                })}
+                        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                            <div className="rounded-2xl bg-indigo-50/70 border border-indigo-100 p-5">
+                                <div className="flex items-center gap-2 text-indigo-700 mb-4">
+                                    <Icon name="graduation-cap" />
+                                    <h5 className="text-xs font-black uppercase">Scuola</h5>
+                                </div>
+                                {affiliations.schools.length ? affiliations.schools.map(school => (
+                                    <div key={school.id} className="flex justify-between items-center gap-3 py-2 border-t border-indigo-100 first:border-0">
+                                        <span className="text-sm font-bold text-slate-700">{school.nome}</span>
+                                        {school.enrollment.classe && <span className="px-2 py-1 rounded-lg bg-white text-indigo-700 text-[10px] font-black uppercase">Classe {school.enrollment.classe}</span>}
+                                    </div>
+                                )) : <p className="text-xs font-bold text-slate-400">Nessuna iscrizione scolastica trovata</p>}
+                            </div>
+                            <div className="rounded-2xl bg-emerald-50/70 border border-emerald-100 p-5">
+                                <div className="flex items-center gap-2 text-emerald-700 mb-4">
+                                    <Icon name="briefcase" />
+                                    <h5 className="text-xs font-black uppercase">Attività</h5>
+                                </div>
+                                {affiliations.workplaces.length ? affiliations.workplaces.map(workplace => (
+                                    <div key={workplace.id} className="flex justify-between items-center gap-3 py-2 border-t border-emerald-100 first:border-0">
+                                        <span className="text-sm font-bold text-slate-700">{workplace.nome}</span>
+                                        <span className="text-[10px] font-black text-emerald-700 uppercase">{workplace.type}</span>
+                                    </div>
+                                )) : <p className="text-xs font-bold text-slate-400">Nessuna attività registrata come datore di lavoro</p>}
+                            </div>
+                        </div>
+                    </section>
+                );
+            })()}
+
+            <div className="flex flex-col sm:flex-row gap-3 pb-8">
+                <button onClick={() => handleSave('users', selectedItem.id, selectedItem)} className="flex-1 bg-blue-600 text-white py-4 rounded-2xl font-black uppercase tracking-widest hover:bg-blue-700 transition-colors flex items-center justify-center gap-2">
+                    <Icon name="save" /> Salva personaggio
+                </button>
+                {!selectedItem.isNew && (
+                    <button onClick={() => handleDelete('users', selectedItem.id)} className="p-4 bg-red-50 text-red-500 rounded-2xl hover:bg-red-500 hover:text-white transition-all">
+                        <Icon name="trash-2" />
+                    </button>
+                )}
             </div>
         </div>
     </div>
 )}
-                                    {/* CONTENUTO MODALE FAMILY */}
-                                    {selectedItem.type_modale === 'family' && (() => {
-                                        const p = getFullMemberData(selectedItem.padre);
-                                        const m = getFullMemberData(selectedItem.madre);
-                                        return (
-                                            <div className="space-y-6">
-                                                <div className="text-blue-600 font-bold flex items-center gap-2 mb-4">
-                                                    <Icon name="banknote" size={16}/> Patrimonio Genitori: €{(p.money + m.money).toLocaleString()}
-                                                </div>
-                                                <div className="grid grid-cols-2 gap-4">
-                                                    <div className="p-4 bg-slate-50 rounded-3xl border border-blue-50 flex flex-col items-center text-center">
-                                                        <Avatar user={p} size="lg" className="mb-3" />
-                                                        <p className="text-[10px] font-black text-blue-400 uppercase mb-2 mt-2">Padre</p>
-                                                        <p className="font-black text-sm uppercase">{p.nome}</p>
-                                                        <p className="text-[10px] text-slate-400 font-bold">Età: {p.eta} | {p.sesso}</p>
-                                                    </div>
-                                                    <div className="p-4 bg-slate-50 rounded-3xl border border-pink-50 flex flex-col items-center text-center">
-                                                        <Avatar user={m} size="lg" className="mb-3" />
-                                                        <p className="text-[10px] font-black text-pink-400 uppercase mb-2 mt-2">Madre</p>
-                                                        <p className="font-black text-sm uppercase">{m.nome}</p>
-                                                        <p className="text-[10px] text-slate-400 font-bold">Età: {m.eta} | {m.sesso}</p>
-                                                    </div>
-                                                </div>
-                                                <div>
-                                                    <h4 className="text-[10px] font-black text-slate-400 uppercase mb-3 px-2">Discendenza</h4>
-                                                    {Object.entries(selectedItem.figli || {}).map(([id, ruolo]) => {
-                                                        const f = getFullMemberData(id);
-                                                        return (
-                                                            <div key={id} className="flex justify-between items-center p-3 bg-white border rounded-2xl mb-2 shadow-sm">
-                                                                <div className="flex items-center gap-3">
-                                                                    <Avatar user={f} />
-                                                                    <div>
-                                                                        <span className="font-black text-xs uppercase">{f.nome}</span>
-                                                                        <p className="text-[10px] text-blue-500 font-bold uppercase">{ruolo}</p>
-                                                                    </div>
-                                                                </div>
-                                                                <div className="text-[10px] font-bold text-slate-400 uppercase text-right">Età: {f.eta}<br/>{f.sesso}</div>
-                                                            </div>
-                                                        );
-                                                    })}
-                                                </div>
-                                                {selectedItem.pets && selectedItem.pets.length > 0 && (
-                                                    <div className="mt-6">
-                                                        <h4 className="text-[10px] font-black text-slate-400 uppercase mb-3 px-2">Animali Domestici</h4>
-                                                        <div className="grid grid-cols-1 gap-2">
-                                                            {selectedItem.pets.map((pet, idx) => {
-                                                                const specie = (pet.specie || "").toLowerCase();
-                                                                let emoji = "🐾";
-                                                                if (specie.includes("cane")) emoji = "🐶";
-                                                                else if (specie.includes("gatto")) emoji = "🐱";
-                                                                else if (specie.includes("uccello") || specie.includes("pappa")) emoji = "🦜";
-                                                                else if (specie.includes("pesce")) emoji = "🐟";
-                                                                else if (specie.includes("drago")) emoji = "🐲";
-                                                                return (
-                                                                    <div key={idx} className="flex items-center justify-between p-3 bg-slate-50 border border-slate-100 rounded-2xl">
-                                                                        <div className="flex items-center gap-3">
-                                                                            <div className="w-10 h-10 bg-white rounded-xl flex items-center justify-center text-xl shadow-sm">{emoji}</div>
-                                                                            <div>
-                                                                                <span className="font-black text-xs uppercase">{pet.nome}</span>
-                                                                                <p className="text-[10px] text-slate-400 font-bold uppercase">{pet.specie}</p>
-                                                                            </div>
-                                                                        </div>
-                                                                        <div className="p-2 bg-white rounded-lg border border-slate-100">
-                                                                            <Icon name="heart" className="text-red-400 w-4 h-4" />
-                                                                        </div>
-                                                                    </div>
-                                                                );
-                                                            })}
-                                                        </div>
-                                                    </div>
-                                                )}
-                                            </div>
-                                        );
-                                    })()}
+
+{/* CONTENUTO MODALE SHOP */}
+{selectedItem.type_modale === 'shop' && (
+    <div className="space-y-6">
+        {/* HEADER & INFO ATTIVITÀ */}
+        <div className="bg-slate-50 p-6 rounded-3xl space-y-4 border border-slate-100">
+            {selectedItem.isNew && (
+                <div>
+                    <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Nome Identificativo (ID)</p>
+                    <input 
+                        className="w-full p-2.5 bg-white border rounded-xl font-bold text-sm focus:ring-2 focus:ring-emerald-500/20 outline-none" 
+                        placeholder="es: Armeria_Centrale" 
+                        onChange={e => setSelectedItem({...selectedItem, id: e.target.value})} 
+                    />
+                </div>
+            )}
+            <div className="flex items-center gap-4">
+                <Avatar user={getFullMemberData(selectedItem.owner_id)} size="lg" />
+                <div className="flex-1">
+                    <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Proprietario / Titolare</p>
+                    <select 
+                        className="w-full p-2.5 bg-white border rounded-xl font-bold text-sm outline-none focus:ring-2 focus:ring-emerald-500/20"
+                        value={selectedItem.owner_id || ''}
+                        onChange={e => setSelectedItem({...selectedItem, owner_id: e.target.value})}
+                    >
+                        <option value="">-- Seleziona Proprietario --</option>
+                        {(citizens || []).map(c => (
+                            <option key={c.id} value={c.id}>
+                                {c.nome} {c.cognome} ({c.id})
+                            </option>
+                        ))}
+                    </select>
+                </div>
+            </div>
+            <div>
+                <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Tipo Attività</p>
+                <input 
+                    className="w-full p-2.5 bg-white border rounded-xl font-bold text-sm outline-none focus:ring-2 focus:ring-emerald-500/20" 
+                    defaultValue={selectedItem.type} 
+                    onChange={e => setSelectedItem({...selectedItem, type: e.target.value})} 
+                />
+            </div>
+            <div className="flex gap-2 pt-2">
+                <button 
+                    onClick={() => handleSave('shops', selectedItem.id, selectedItem)} 
+                    className="flex-1 bg-emerald-600 hover:bg-emerald-700 text-white py-3 rounded-xl font-black text-xs uppercase tracking-wider transition-all"
+                >
+                    {selectedItem.isNew ? 'Crea Attività' : 'Aggiorna Info'}
+                </button>
+                {!selectedItem.isNew && (
+                    <button 
+                        onClick={() => handleDelete('shops', selectedItem.id)} 
+                        className="p-3 bg-red-50 text-red-500 rounded-xl hover:bg-red-500 hover:text-white transition-all"
+                        title="Elimina Attività"
+                    >
+                        <Icon name="trash-2" size={18} />
+                    </button>
+                )}
+            </div>
+        </div>
+
+        {/* SEZIONE PRODOTTI / CATALOGO */}
+        <div>
+            <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-3 px-2">📦 Gestione Catalogo</h4>
+            <div className="space-y-3">
+                {Object.entries(shopItems || {}).map(([nomeProd, dati]) => (
+                    <div key={nomeProd} className="p-4 bg-white border rounded-2xl shadow-sm space-y-3">
+                        <div className="flex justify-between items-center">
+                            <span className="font-black text-xs uppercase italic text-slate-600">{nomeProd}</span>
+                            <button 
+                                onClick={async (e) => {
+                                    e.preventDefault();
+                                    if(confirm(`Eliminare ${nomeProd}?`)) {
+                                        await window.FB.deleteDoc(window.FB.doc(window.db, 'guilds', guildId, 'shops', selectedItem.id, 'items', nomeProd));
+                                    }
+                                }}
+                                className="text-slate-300 hover:text-red-500 transition-colors"
+                            >
+                                <Icon name="trash" size={14}/>
+                            </button>
+                        </div>
+                        <div className="grid grid-cols-3 gap-2">
+                            <div>
+                                <label className="text-[8px] font-black uppercase text-slate-400">Prezzo (€)</label>
+                                <input type="number" className="w-full p-2 bg-slate-50 border rounded-lg text-xs font-bold" defaultValue={dati.prezzo} id={`price-${nomeProd}`} />
+                            </div>
+                            <div>
+                                <label className="text-[8px] font-black uppercase text-slate-400">Stock</label>
+                                <input type="number" className="w-full p-2 bg-slate-50 border rounded-lg text-xs font-bold" defaultValue={dati.stock} id={`stock-${nomeProd}`} />
+                            </div>
+                            <div className="flex items-end">
+                                <button 
+                                    onClick={async (e) => {
+                                        e.preventDefault();
+                                        const p = Number(document.getElementById(`price-${nomeProd}`).value);
+                                        const s = Number(document.getElementById(`stock-${nomeProd}`).value);
+                                        const itemRef = window.FB.doc(window.db, 'guilds', guildId, 'shops', selectedItem.id, 'items', nomeProd);
+                                        await window.FB.setDoc(itemRef, { prezzo: p, stock: s }, { merge: true });
+                                    }}
+                                    className="w-full bg-slate-800 hover:bg-slate-900 text-white p-2 rounded-lg text-[10px] font-black uppercase tracking-wider transition-all"
+                                >
+                                    Salva
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                ))}
+
+                {/* Form Nuovo Articolo */}
+                <div className="p-4 bg-emerald-50/60 border-2 border-dashed border-emerald-200 rounded-2xl space-y-3">
+                    <p className="text-[10px] font-black text-emerald-700 uppercase tracking-wider">Aggiungi Nuovo Articolo</p>
+                    <input id="new-item-name" placeholder="Nome Articolo (es: Pizza Margherita)" className="w-full p-2.5 rounded-xl text-xs border bg-white font-bold outline-none" />
+                    <div className="grid grid-cols-2 gap-2">
+                        <input id="new-item-price" type="number" placeholder="Prezzo €" className="p-2.5 rounded-xl text-xs border bg-white font-bold outline-none" />
+                        <input id="new-item-stock" type="number" placeholder="Quantità" className="p-2.5 rounded-xl text-xs border bg-white font-bold outline-none" />
+                    </div>
+                    <button 
+                        onClick={async (e) => {
+                            e.preventDefault();
+                            const nome = document.getElementById('new-item-name').value;
+                            const prezzo = Number(document.getElementById('new-item-price').value);
+                            const stock = Number(document.getElementById('new-item-stock').value);
+                            if(!nome) return alert("Inserisci il nome dell'articolo");
+                            
+                            const itemRef = window.FB.doc(window.db, 'guilds', guildId, 'shops', selectedItem.id, 'items', nome);
+                            await window.FB.setDoc(itemRef, { prezzo, stock, categoria: 'Articolo' });
+                            
+                            document.getElementById('new-item-name').value = '';
+                            document.getElementById('new-item-price').value = '';
+                            document.getElementById('new-item-stock').value = '';
+                        }}
+                        className="w-full bg-emerald-600 hover:bg-emerald-700 text-white py-2.5 rounded-xl font-black text-[10px] uppercase tracking-widest transition-all"
+                    >
+                        Inserisci nel Catalogo
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        {/* STAFF & ASSUNZIONE */}
+        <div>
+            <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-3 px-2">💼 Staff & Lavoratori</h4>
+            
+            {/* Lista Dipendenti Correnti */}
+            <div className="space-y-2 mb-4">
+                {(selectedItem.dipendenti || []).map(d_id => {
+                    const d = getFullMemberData(d_id);
+                    return (
+                        <div key={d_id} className="p-3 bg-white border border-slate-100 rounded-2xl flex items-center justify-between shadow-sm">
+                            <div className="flex items-center gap-3">
+                                <Avatar user={d} />
+                                <div>
+                                    <p className="font-bold text-slate-800 text-xs">{d.nome} {d.cognome}</p>
+                                    <p className="text-[10px] font-semibold text-emerald-600">{d.lavoro || 'Dipendente'}</p>
                                 </div>
                             </div>
+                            <button 
+                                onClick={async (e) => {
+                                    e.preventDefault();
+                                    const newList = selectedItem.dipendenti.filter(id => id !== d_id);
+                                    
+                                    // 1. Rimuove dallo shop
+                                    const updatedShop = { ...selectedItem, dipendenti: newList };
+                                    setSelectedItem(updatedShop);
+                                    await handleSave('shops', selectedItem.id, updatedShop);
+                                    
+                                    // 2. Ripristina il profilo utente
+                                    await handleSave('users', d_id, { 
+                                        lavoro: "Disoccupato",
+                                        shopId: null,
+                                        shopNome: null
+                                    });
+                                }}
+                                className="p-2 text-slate-300 hover:text-red-500 transition-colors"
+                                title="Licenzia Dipendente"
+                            >
+                                <Icon name="user-minus" size={16} />
+                            </button>
+                        </div>
+                    );
+                })}
+            </div>
+
+            {/* Form Assunzione Intelligente con Menu a Tendina */}
+            <div className="p-4 bg-slate-50 rounded-2xl border border-dashed border-slate-200 space-y-3">
+                <p className="text-[10px] font-black text-slate-500 uppercase tracking-wider">Assumi Nuovo Dipendente</p>
+                
+                {/* 1. Selezione Cittadino da Array 'citizens' */}
+                <div>
+                    <label className="text-[9px] font-bold text-slate-400 uppercase mb-1 block">Seleziona Cittadino</label>
+                    <select id="new-staff-select" className="w-full p-2.5 rounded-xl text-xs border bg-white font-bold outline-none">
+                        <option value="">-- Seleziona Cittadino --</option>
+                        {(citizens || []).map(c => (
+                            <option key={c.id} value={c.id}>
+                                {c.nome} {c.cognome} ({c.lavoro || 'Disoccupato'})
+                            </option>
+                        ))}
+                    </select>
+                </div>
+
+                {/* 2. Mansione / Ruolo (da Lista Jobs) */}
+                <div>
+                    <label className="text-[9px] font-bold text-slate-400 uppercase mb-1 block">Mansione / Lavoro (da Catalogo Jobs)</label>
+                    <select id="new-staff-job-select" className="w-full p-2.5 rounded-xl text-xs border bg-white font-bold outline-none">
+                        <option value="">-- Seleziona Lavoro --</option>
+                        {Array.isArray(jobs) ? (
+                            jobs.map(j => (
+                                <option key={j.id} value={j.id}>{j.id}</option>
+                            ))
+                        ) : typeof jobs === 'object' && jobs !== null ? (
+                            Object.keys(jobs).map(jKey => (
+                                <option key={jKey} value={jKey}>{jKey}</option>
+                            ))
+                        ) : null}
+                    </select>
+                </div>
+
+                {/* Pulsante Conferma Assunzione */}
+                <button 
+                    onClick={async (e) => {
+                        e.preventDefault();
+                        const staffId = document.getElementById('new-staff-select').value;
+                        const jobRole = document.getElementById('new-staff-job-select').value;
+
+                        if (!staffId) return alert("Seleziona un cittadino da assumere.");
+                        if (!jobRole) return alert("Seleziona la mansione dal catalogo lavori.");
+
+                        const currentStaff = selectedItem.dipendenti || [];
+                        if (currentStaff.includes(staffId)) return alert("Questo cittadino è già nello staff dell'attività.");
+
+                        const newList = [...currentStaff, staffId];
+
+                        // A. Aggiorna lo Shop senza chiudere il modale
+                        const updatedShop = { ...selectedItem, dipendenti: newList };
+                        setSelectedItem(updatedShop);
+                        await handleSave('shops', selectedItem.id, updatedShop);
+
+                        // B. Usa il tuo 'handleSave' esistente per aggiornare il cittadino
+                        await handleSave('users', staffId, { 
+                            lavoro: jobRole,
+                            shopId: selectedItem.id,
+                            shopNome: selectedItem.type || selectedItem.id
+                        });
+
+                        // C. Reset dei campi
+                        document.getElementById('new-staff-select').value = '';
+                        document.getElementById('new-staff-job-select').value = '';
+                    }}
+                    className="w-full bg-emerald-600 hover:bg-emerald-700 text-white p-2.5 rounded-xl font-black text-xs uppercase tracking-wider flex items-center justify-center gap-2 transition-all shadow-sm"
+                >
+                    <Icon name="user-plus" size={16}/>
+                    Conferma Assunzione
+                </button>
+            </div>
+        </div>
+    </div>
+)}
+
+{/* CONTENUTO MODALE JOB */}
+{selectedItem.type_modale === 'job' && (
+    <div className="space-y-4">
+        <div className="grid grid-cols-2 gap-4">
+            <div className="col-span-2">
+                <label className="text-[10px] font-black uppercase text-slate-400 ml-2">Nome Professione</label>
+                <input disabled={!selectedItem.isNew} className="w-full p-3 bg-slate-50 border rounded-2xl font-bold" defaultValue={selectedItem.id} onChange={e => setSelectedItem({...selectedItem, id: e.target.value})} />
+            </div>
+            <div className="col-span-2">
+                <label className="text-[10px] font-black uppercase text-slate-400 ml-2">Stipendio Base (€)</label>
+                <input type="number" className="w-full p-3 bg-slate-50 border rounded-2xl font-bold text-emerald-600" defaultValue={selectedItem.stipendio} onChange={e => setSelectedItem({...selectedItem, stipendio: Number(e.target.value)})} />
+            </div>
+        </div>
+
+        <div className="mt-6">
+            <h4 className="text-[10px] font-black text-slate-400 uppercase mb-3 px-2">👥 Staff Assegnato</h4>
+            <div className="space-y-2 mb-4">
+                {citizens.filter(c => c.lavoro === selectedItem.id).map(worker => (
+                    <div key={worker.id} className="p-3 bg-white border border-slate-100 rounded-2xl flex items-center justify-between shadow-sm">
+                        <div className="flex items-center gap-3">
+                            <Avatar user={worker} />
+                            <span className="font-bold text-xs uppercase">{worker.nome} {worker.cognome}</span>
+                        </div>
+                        <button onClick={() => handleSave('users', worker.id, { lavoro: 'Disoccupato' })} className="p-2 text-slate-300 hover:text-red-500"><Icon name="user-minus" size={16} /></button>
+                    </div>
+                ))}
+            </div>
+            <div className="p-3 bg-emerald-50 rounded-2xl border border-dashed border-emerald-200">
+                <p className="text-[10px] font-black text-emerald-600 uppercase mb-2">Assumi nel Registro</p>
+                <div className="flex gap-2">
+                    <input id="job-staff-id" placeholder="ID Discord o NPC" className="flex-1 p-2 rounded-lg text-xs border bg-white" />
+                    <button onClick={() => {
+                        const id = document.getElementById('job-staff-id').value;
+                        if(id) { handleSave('users', id, { lavoro: selectedItem.id }); document.getElementById('job-staff-id').value = ''; }
+                    }} className="bg-emerald-600 text-white p-2 rounded-lg"><Icon name="user-plus" size={16}/></button>
+                </div>
+            </div>
+        </div>
+
+        <div className="flex gap-3 pt-6">
+            <button onClick={() => handleSave('jobs', selectedItem.id, selectedItem)} className="flex-1 bg-blue-600 text-white py-4 rounded-2xl font-black uppercase tracking-widest hover:bg-blue-700 transition-colors">Salva Qualifica</button>
+            {!selectedItem.isNew && (
+                <button onClick={() => handleDelete('jobs', selectedItem.id)} className="p-4 bg-red-50 text-red-500 rounded-2xl hover:bg-red-500 hover:text-white transition-all"><Icon name="trash-2" /></button>
+            )}
+        </div>
+    </div>
+)}
+
+{/* CONTENUTO MODALE BUILDING */}
+{selectedItem.type_modale === 'building' && (
+    <div className="space-y-6">
+        <div className="grid grid-cols-1 gap-4">
+            <div>
+                <label className="text-[10px] font-black uppercase text-slate-400 ml-2">Nome Luogo</label>
+                <input 
+                    disabled={!selectedItem.isNew} 
+                    className="w-full p-3 bg-slate-50 border rounded-2xl font-bold" 
+                    defaultValue={selectedItem.nome} 
+                    onChange={e => setSelectedItem({...selectedItem, nome: e.target.value, id: selectedItem.isNew ? e.target.value.trim().replace(/\s+/g, '_') : selectedItem.id})} 
+                    placeholder="Es: Casa Loud, Parco Centrale..." 
+                />
+            </div>
+            <div>
+                <label className="text-[10px] font-black uppercase text-slate-400 ml-2">Tipologia</label>
+                <select 
+                    className="w-full p-3 bg-slate-50 border rounded-2xl font-bold" 
+                    value={selectedItem.tipo} 
+                    onChange={e => setSelectedItem({...selectedItem, tipo: e.target.value})}
+                >
+                    <option value="casa">Casa Privata</option>
+                    <option value="pubblico">Luogo Pubblico / Parco</option>
+                    <option value="scuola_asilo">Asilo (3-5 anni)</option>
+                    <option value="scuola_elementari">Elementari (6-10 anni)</option>
+                    <option value="scuola_medie">Medie (11-13 anni)</option>
+                    <option value="scuola_superiori">Superiori (14-18 anni)</option>
+                </select>
+            </div>
+
+            {selectedItem.tipo === 'casa' && (
+                <div>
+                    <label className="text-[10px] font-black uppercase text-slate-400 ml-2">Famiglia Residente</label>
+                    <select 
+                        className="w-full p-3 bg-slate-50 border rounded-2xl font-bold" 
+                        value={selectedItem.famigliaId || ''} 
+                        onChange={e => setSelectedItem({...selectedItem, famigliaId: e.target.value})}
+                    >
+                        <option value="">-- Seleziona Famiglia --</option>
+                        {families.map(f => (
+                            <option key={f.id} value={f.nome || f.id}>{f.nome || f.id}</option>
+                        ))}
+                    </select>
+                </div>
+            )}
+        </div>
+
+        <div className="mt-6">
+            <h4 className="text-[10px] font-black text-slate-400 uppercase mb-3 px-2">🚪 Stanze / Aree Disponibili</h4>
+            <div className="space-y-2 mb-4">
+                {(selectedItem.stanze || []).map((stanza, idx) => (
+                    <div key={idx} className="p-3 bg-white border border-slate-100 rounded-2xl flex items-center justify-between shadow-sm">
+                        <span className="font-bold text-xs uppercase">{typeof stanza === 'object' ? stanza.nome : stanza}</span>
+                        <button 
+                            onClick={() => {
+                                const newStanze = selectedItem.stanze.filter((_, i) => i !== idx);
+                                setSelectedItem({...selectedItem, stanze: newStanze});
+                            }} 
+                            className="p-2 text-slate-300 hover:text-red-500"
+                        >
+                            <Icon name="trash" size={14} />
+                        </button>
+                    </div>
+                ))}
+            </div>
+            <div className="flex gap-2 p-3 bg-indigo-50 rounded-2xl border border-dashed border-indigo-200">
+                <input id="new-room-name" placeholder="Aggiungi Stanza..." className="flex-1 p-2 rounded-lg text-xs border bg-white font-bold" />
+                <button 
+                    onClick={() => {
+                        const input = document.getElementById('new-room-name');
+                        if(input.value.trim()) {
+                            setSelectedItem({
+                                ...selectedItem, 
+                                stanze: [...(selectedItem.stanze || []), input.value.trim()]
+                            });
+                            input.value = '';
+                        }
+                    }} 
+                    className="bg-indigo-600 text-white p-2 rounded-lg"
+                >
+                    <Icon name="plus" size={16}/>
+                </button>
+            </div>
+        </div>
+
+        <div className="flex gap-3 pt-6">
+            <button 
+                onClick={() => handleSave('edifici', selectedItem.id, {
+                    nome: selectedItem.nome,
+                    tipo: selectedItem.tipo,
+                    famigliaId: selectedItem.famigliaId || "",
+                    stanze: selectedItem.stanze || []
+                })} 
+                className="flex-1 bg-indigo-600 text-white py-4 rounded-2xl font-black uppercase tracking-widest hover:bg-indigo-700 transition-colors"
+            >
+                {selectedItem.isNew ? 'Crea Luogo' : 'Salva Modifiche'}
+            </button>
+            {!selectedItem.isNew && (
+                <button onClick={() => handleDelete('edifici', selectedItem.id)} className="p-4 bg-red-50 text-red-500 rounded-2xl hover:bg-red-500 hover:text-white transition-all">
+                    <Icon name="trash-2" />
+                </button>
+            )}
+        </div>
+    </div>
+)}
+
+{/* CONTENUTO MODALE FAMILY */}
+{selectedItem.type_modale === 'family' && (() => {
+    const p = getFullMemberData(selectedItem.padre);
+    const m = getFullMemberData(selectedItem.madre);
+    
+    // Funzione helper locale con verifica dell'esistenza dell'utente
+const updateMemberFamilyRole = async (memberId, roleText) => {
+    if (!memberId) return true;
+    
+    // Pulizia dell'ID
+    const cleanId = memberId.replace(/<@!?|>|/g, "").trim();
+    const uId = /^\d+$/.test(cleanId) ? cleanId : cleanId.toLowerCase().replace(/\s+/g, "_");
+    
+    if (!uId) return false;
+
+    // 1. Verifica tramite l'helper di lettura che hai già nel componente
+    const existingMember = getFullMemberData(uId);
+
+        // Se l'oggetto restituito non ha un ID, significa che non è stato trovato nel database (fallback di getFullMemberData)
+    if (!existingMember || !existingMember.id) {
+        alert(`⚠️ Utente con ID "${memberId}" non trovato nel database cittadini! Operazione annullata per evitare la creazione di personaggi fantasma.`);
+        return false;
+    }
+
+    // 2. Se esiste, aggiorna il family_role
+    const userRef = window.FB.doc(window.db, 'guilds', guildId, 'users', uId);
+    await window.FB.setDoc(userRef, { family_role: roleText }, { merge: true });
+    return true;
+};
+
+    return (
+        <div className="space-y-6">
+            <div className="bg-slate-50 p-4 rounded-3xl mb-4 space-y-2">
+                
+                {/* ID Famiglia: Modificabile SOLO se isNew è true */}
+                <div>
+                    <label className="text-[10px] font-black uppercase text-slate-400">ID Famiglia</label>
+                    {selectedItem.isNew ? (
+                        <input 
+                            className="w-full p-2 bg-white border rounded-xl font-bold text-xs" 
+                            placeholder="es: Famiglia_Rossi" 
+                            value={selectedItem.id || ''}
+                            onChange={e => setSelectedItem({...selectedItem, id: e.target.value.trim()})} 
+                        />
+                    ) : (
+                        <div className="w-full p-2 bg-slate-200 border rounded-xl font-bold text-xs text-slate-500 cursor-not-allowed select-none">
+                            {selectedItem.id}
                         </div>
                     )}
                 </div>
-            );
+
+                <div>
+                    <label className="text-[10px] font-black uppercase text-slate-400">Nome Casata</label>
+                    <input className="w-full p-2 bg-white border rounded-xl font-bold" defaultValue={selectedItem.nome || selectedItem.id} onChange={e => setSelectedItem({...selectedItem, nome: e.target.value})} />
+                </div>
+
+<div className="grid grid-cols-2 gap-2">
+    <div>
+        <label className="text-[10px] font-black uppercase text-slate-400">ID Padre</label>
+        <input 
+            className="w-full p-2 bg-white border rounded-xl font-bold text-xs" 
+            value={selectedItem.padre || ''} 
+            onChange={e => setSelectedItem({...selectedItem, padre: e.target.value})} 
+            placeholder="ID Padre"
+        />
+    </div>
+    <div>
+        <label className="text-[10px] font-black uppercase text-slate-400">ID Madre</label>
+        <input 
+            className="w-full p-2 bg-white border rounded-xl font-bold text-xs" 
+            value={selectedItem.madre || ''} 
+            onChange={e => setSelectedItem({...selectedItem, madre: e.target.value})} 
+            placeholder="ID Madre"
+        />
+    </div>
+</div>
+
+                <div className="flex gap-2 pt-2">
+                    <button onClick={async () => {
+                        const casataNome = selectedItem.nome || selectedItem.id;
+
+                        if (!selectedItem.id) {
+                            alert("⚠️ Inserisci un ID valido per la famiglia!");
+                            return;
+                        }
+
+                        // Verifichiamo prima che Padre e Madre esistano sul DB
+                        if (selectedItem.padre) {
+                            const okPadre = await updateMemberFamilyRole(selectedItem.padre, `Capofamiglia ${casataNome}`);
+                            if (!okPadre) return; // Si interrompe se l'ID non esiste
+                        }
+
+                        if (selectedItem.madre) {
+                            const okMadre = await updateMemberFamilyRole(selectedItem.madre, `Matriarca ${casataNome}`);
+                            if (!okMadre) return; // Si interrompe se l'ID non esiste
+                        }
+
+                        // Se i controlli sono passati, salva la famiglia
+                        await handleSave('families', selectedItem.id, selectedItem);
+                    }} className="flex-1 bg-blue-600 text-white py-2 rounded-xl font-bold text-[10px] uppercase">
+                        {selectedItem.isNew ? 'Crea Famiglia' : 'Salva Modifiche'}
+                    </button>
+                    
+                    {!selectedItem.isNew && (
+                        <button onClick={() => handleDelete('families', selectedItem.id)} className="p-2 bg-red-50 text-red-500 rounded-xl hover:bg-red-500 hover:text-white transition-all">
+                            <Icon name="trash-2" size={18} />
+                        </button>
+                    )}
+                </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-4">
+                <div className="p-4 bg-slate-50 rounded-3xl border border-blue-50 flex flex-col items-center text-center">
+                    <Avatar user={p} size="lg" />
+                    <p className="text-[10px] font-black text-blue-400 uppercase mt-2 italic">{p.nome}</p>
+                    <p className="text-[9px] text-slate-400 font-bold uppercase mt-1">Età: {p.eta} | {p.sesso}</p>
+                    <p className="text-[9px] text-emerald-600 font-black uppercase">{p.lavoro || 'Disoccupato'}</p>
+                    <p className="text-[8px] text-slate-300 font-bold uppercase italic">{p.nascita}</p>
+                </div>
+                <div className="p-4 bg-slate-50 rounded-3xl border border-pink-50 flex flex-col items-center text-center">
+                    <Avatar user={m} size="lg" />
+                    <p className="text-[10px] font-black text-pink-400 uppercase mt-2 italic">{m.nome}</p>
+                    <p className="text-[9px] text-slate-400 font-bold uppercase mt-1">Età: {m.eta} | {m.sesso}</p>
+                    <p className="text-[9px] text-emerald-600 font-black uppercase">{m.lavoro || 'Disoccupata'}</p>
+                    <p className="text-[8px] text-slate-300 font-bold uppercase italic">{m.nascita}</p>
+                </div>
+            </div>
+
+            <div>
+                <h4 className="text-[10px] font-black text-slate-400 uppercase mb-3 px-2">Discendenza</h4>
+                {Object.entries(selectedItem.figli || {}).map(([id, ruolo]) => {
+                    const f = getFullMemberData(id);
+                    return (
+                        <div key={id} className="flex justify-between items-center p-3 bg-white border rounded-2xl mb-2 shadow-sm">
+                            <div className="flex items-center gap-3">
+                                <Avatar user={f} />
+                                <div>
+                                    <span className="font-black text-xs uppercase">{f.nome}</span>
+                                    <p className="text-[10px] text-blue-500 font-bold uppercase">{ruolo}</p>
+                                </div>
+                            </div>
+                            <div className="text-[10px] font-bold text-slate-400 uppercase text-right">Età: {f.eta} | {f.sesso}<br/><span className="text-[8px] italic">{f.nascita}</span></div>
+                        </div>
+                    );
+                })}
+
+                {/* AGGIUNTA FIGLIO/A CON CONTROLLO PREVENTIVO */}
+                <div className="mt-4 p-3 bg-blue-50 rounded-2xl border border-dashed border-blue-200">
+                    <p className="text-[10px] font-black text-blue-600 uppercase mb-2">Aggiungi Figlio/a</p>
+                    <div className="flex gap-2">
+                        <input id="new-child-id" placeholder="ID Discord o ID NPC" className="flex-1 p-2 rounded-lg text-xs border" />
+                        <input id="new-child-role" placeholder="Ruolo (es: Primo genito)" className="flex-1 p-2 rounded-lg text-xs border" />
+                        <button onClick={async () => {
+                            const idInput = document.getElementById('new-child-id').value.trim();
+                            const roleInput = document.getElementById('new-child-role').value.trim();
+                            
+                            if (idInput && roleInput) {
+                                const casataNome = selectedItem.nome || selectedItem.id;
+                                
+                                // 1. Verifica se l'utente esiste su Firestore PRIMA di aggiungerlo
+                                const ok = await updateMemberFamilyRole(idInput, `Figlio/a (${roleInput}) ${casataNome}`);
+                                if (!ok) return; // Blocca se l'utente non viene trovato
+
+                                // 2. Se l'utente esiste, aggiorna la famiglia
+                                const newFigli = {...(selectedItem.figli || {}), [idInput]: roleInput};
+                                await handleSave('families', selectedItem.id, {...selectedItem, figli: newFigli});
+                                
+                                document.getElementById('new-child-id').value = '';
+                                document.getElementById('new-child-role').value = '';
+                            } else {
+                                alert("⚠️ Compila sia l'ID del figlio che il Ruolo.");
+                            }
+                        }} className="bg-blue-600 text-white p-2 rounded-lg"><Icon name="plus" size={16}/></button>
+                    </div>
+                </div>
+            </div>
+
+            <div className="mt-6">
+                <h4 className="text-[10px] font-black text-slate-400 uppercase mb-3 px-2">Animali Domestici</h4>
+                <div className="grid grid-cols-1 gap-2 mb-4">
+                    {(selectedItem.pets || []).map((pet, idx) => {
+                        const pData = getFullMemberData(pet.id);
+                        return (
+                            <div key={idx} className="flex items-center justify-between p-3 bg-white border rounded-2xl shadow-sm">
+                                <div className="flex items-center gap-3">
+                                    <Avatar user={pData} />
+                                    <div>
+                                        <span className="font-black text-xs uppercase">{pet.nome}</span>
+                                        <p className="text-[10px] text-emerald-500 font-bold uppercase">{pet.specie}</p>
+                                    </div>
+                                </div>
+                                <button onClick={() => {
+                                    const filtered = selectedItem.pets.filter((_, i) => i !== idx);
+                                    handleSave('families', selectedItem.id, {...selectedItem, pets: filtered});
+                                }} className="p-2 text-slate-300 hover:text-red-500 transition-colors"><Icon name="trash-2" size={14}/></button>
+                            </div>
+                        );
+                    })}
+                </div>
+                <div className="p-3 bg-emerald-50 rounded-2xl border border-dashed border-emerald-200">
+                    <p className="text-[10px] font-black text-emerald-600 uppercase mb-2">Aggiungi Animale (NPC)</p>
+                    <div className="flex gap-2">
+                        <input id="new-pet-id" placeholder="ID NPC Animale" className="flex-1 p-2 rounded-lg text-xs border" />
+                        <button onClick={async () => {
+                            const id = document.getElementById('new-pet-id').value.trim();
+                            if(!id) return;
+
+                                                        const petObj = getFullMemberData(id);
+                            
+                            // Verifica se l'NPC esiste
+                            if (!petObj || !petObj.id) {
+                                alert(`⚠️ Animale NPC con ID "${id}" non trovato!`);
+                                return;
+                            }
+
+                            const newPets = [...(selectedItem.pets || []), { id: petObj.id, nome: petObj.nome, specie: petObj.specie || "Animale" }];
+                            await handleSave('families', selectedItem.id, {...selectedItem, pets: newPets});
+                            document.getElementById('new-pet-id').value = '';
+                        }} className="bg-emerald-600 text-white p-2 rounded-lg"><Icon name="plus" size={16}/></button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    );
+})()}
+                                </div>
+                            </div>
+                        </div>
+                                        )}
+
+{/* MODALE DI CROP DELL'IMMAGINE */}
+{cropImage && (
+                        <ImageCropper 
+                            src={cropImage} 
+                            onCancel={() => setCropImage(null)} 
+                            onCrop={(croppedData) => {
+                                setSelectedItem(prev => ({...prev, avatar: croppedData}));
+                                setCropImage(null);
+                                setTimeout(() => lucide.createIcons(), 100);
+                            }}  
+                        />
+                    )}
+                </div>
+        );
+    }
+
+    function NavItem({ active, icon, label, onClick }) {
+        return (
+            <button onClick={onClick} className={`w-full flex items-center gap-3 p-3 rounded-xl transition-all ${active ? 'bg-blue-600 text-white shadow-lg' : 'hover:bg-white/5'}`}>
+                <Icon name={icon} /> <span className="font-bold text-sm uppercase tracking-tighter">{label}</span>
+            </button>
+        );
+    }
+
+// Funzione per calcolare l'età esatta
+function calcolaEta(dataStr) {
+    if (!dataStr) return null;
+    
+    let giorno, mese, anno;
+
+    if (typeof dataStr === 'string' && dataStr.includes('/')) {
+        const parti = dataStr.split('/');
+        giorno = parseInt(parti[0], 10);
+        mese = parseInt(parti[1], 10) - 1;
+        anno = parseInt(parti[2], 10);
+    } else {
+        const d = new Date(dataStr);
+        if (isNaN(d.getTime())) return parseInt(dataStr) || null;
+        giorno = d.getDate();
+        mese = d.getMonth();
+        anno = d.getFullYear();
+    }
+
+    const oggi = new Date();
+    let eta = oggi.getFullYear() - anno;
+    const m = oggi.getMonth() - mese;
+    if (m < 0 || (m === 0 && oggi.getDate() < giorno)) eta--;
+    return eta;
+}
+
+// Restituisce solo i cittadini idonei per l'edificio scolastico selezionato
+function getCandidatiIdonei(school, allUsers) {
+    if (!school) return [];
+    
+    // Legge il tipo dal documento Firestore (es. "scuola_superiori", "scuola_medie")
+    const tipo = (school.tipo || "").toLowerCase();
+
+    return Object.values(allUsers || {}).filter(u => {
+        const valData = u.Nascita || u.nascita || u.dataNascita || u.compleanno || u.eta;
+        const eta = calcolaEta(valData);
+
+        if (eta === null) return false;
+        if (u && u.specie && /\b(?:animale|pet|can(?:e|i)|gatt(?:o|i)|lup(?:o|i)|ors(?:o|i)|volp(?:e|i)|conigl(?:io|i)|leon(?:e|i)|tig(?:re|ri)|pum(?:a|e)|leopard(?:o|i)|giaguar(?:o|i)|scimmi(?:a|e)|gorill(?:a|e)|babbuin(?:o|i)|cerv(?:o|i)|ren(?:o|i|na|ne)|cavall(?:o|i)|mucc(?:h|he)|pecor(?:a|e)|maial(?:e|i)|capr(?:a|e)|gallin(?:a|e)|poll(?:o|i)|anat(?:ra|re)|oc(?:a|he)|paper(?:a|i)|cign(?:o|i)|falc(?:o|i)|aquil(?:a|e)|guf(?:o|i)|corv(?:o|i)|piccion(?:e|i)|passer(?:o|i)|canarin(?:o|i)|cricet(?:o|i)|top(?:o|i)|ratt(?:o|i)|furett(?:o|i)|tartarug(?:a|he)|lucertol(?:a|e)|serpent(?:e|i)|ran(?:a|e)|rosp(?:o|i)|coccodrill(?:o|i)|alligat(?:ore|ori)|delfin(?:o|i)|balen(?:a|e)|squal(?:o|i)|pesc(?:e|i)|medus(?:a|e)|polp(?:o|i)|granch(?:io|i)|gamber(?:o|i)|cavallucci? marini?|pinguin(?:o|i)|pand(?:a|e)|koal(?:a|e)|scoiattol(?:o|i)|elefant(?:e|i)|rinoceront(?:e|i)|ippopotam(?:o|i)|giraff(?:a|e)|zebr(?:a|e)|fennec|procion(?:e|i))\b/i.test(String(u.specie))) {
+            return false;
         }
 
-        function NavItem({ active, icon, label, onClick }) {
-            return (
-                <button onClick={onClick} className={`w-full flex items-center gap-3 p-3 rounded-xl transition-all ${active ? 'bg-blue-600 text-white shadow-lg' : 'hover:bg-white/5'}`}>
-                    <Icon name={icon} /> <span className="font-bold text-sm uppercase tracking-tighter">{label}</span>
-                </button>
-            );
-        }
+        // Filtro fasce d'età basato sul tipo di scuola di Firestore
+        if (tipo === 'scuola_asilo') return eta >= 3 && eta <= 5;
+        if (tipo === 'scuola_elementari') return eta >= 6 && eta <= 10;
+        if (tipo === 'scuola_medie') return eta >= 11 && eta <= 13;
+        if (tipo === 'scuola_superiori' || tipo === 'scuola') return eta >= 14 && eta <= 19;
+        
+        // Fallback generico per scuole
+        return eta >= 3 && eta <= 19;
+    });
+}
 
+if ('serviceWorker' in navigator && (window.location.protocol === 'https:' || window.location.hostname === 'localhost')) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('/sw.js')
+      .then((reg) => {
+        console.log('Service Worker registrato con successo!', reg.scope);
+        reg.update();
+      })
+      .catch((err) => console.error('Errore registrazione:', err));
+  });
+}
         const root = ReactDOM.createRoot(document.getElementById('root'));
         root.render(<App />);
     </script>
