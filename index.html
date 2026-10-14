@@ -1996,12 +1996,18 @@ if (child.metadata.gemelloDi) {
                             batch.set(userRef, { family_role: roleString }, { merge: true });
                         }
 
-                        const familyToSave = { ...selectedItem, figli: updatedFigli };
+                        const familyData = { ...selectedItem };
+                        delete familyData.isNew;
+                        delete familyData.type_modale;
+                        const familyToSave = { ...familyData, figli: updatedFigli };
                         const familyRef = window.FB.doc(window.db, 'guilds', guildId, 'families', selectedItem.id);
-                        batch.set(familyRef, familyToSave, { merge: true });
+                        batch.set(familyRef, {
+                            ...familyToSave,
+                            isNew: window.FB.deleteField()
+                        }, { merge: true });
                         await batch.commit();
 
-                        setSelectedItem(familyToSave);
+                        setSelectedItem({ ...familyToSave, type_modale: 'family', isNew: false });
                         alert("✅ Famiglia e ruoli dei figli aggiornati con successo!");
                     }} className="flex-1 bg-blue-600 text-white py-2 rounded-xl font-bold text-[10px] uppercase">
                         {selectedItem.isNew ? 'Crea Famiglia' : 'Salva Modifiche'}
