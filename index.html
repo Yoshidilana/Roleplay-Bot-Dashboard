@@ -1970,42 +1970,42 @@ const availableJobCandidates = (citizens || []).filter(c => {
                             if (!okMadre) return;
                         }
 
-                        // AGGIORNA E SINCRONIZZA I RUOLI DEI FIGLI AL SALVATAGGIO
-                        const batch = window.FB.writeBatch(window.db);
-                        const updatedFigli = {};
+// AGGIORNA E SINCRONIZZA I RUOLI DEI FIGLI AL SALVATAGGIO
+const batch = window.FB.writeBatch(window.db);
+const updatedFigli = {};
 
-                        for (let i = 0; i < childEntries.length; i++) {
-                            const child = childEntries[i];
-                            const isFemmina = String(child.member.sesso || '').toUpperCase() === 'F';
-const role = isFemmina ? 'Figlia' : 'Figlio';
-const labelGemello = isFemmina ? 'Gemella' : 'Gemello';
-const suffissoNato = isFemmina ? 'nata' : 'nato';
+for (let i = 0; i < childEntries.length; i++) {
+    const child = childEntries[i];
+    const isFemmina = String(child.member.sesso || '').toUpperCase() === 'F';
+    const role = isFemmina ? 'Figlia' : 'Figlio';
+    const labelGemello = isFemmina ? 'Gemella' : 'Gemello';
+    const suffissoNato = isFemmina ? 'nata' : 'nato';
 
-let roleString = `${role} · ${i + 1}° ${suffissoNato} ${casataNome}`;
-if (child.metadata.gemelloDi) {
-    roleString = `${role} · ${labelGemello} (${child.metadata.ordineGemello === 1 ? '1° ' + suffissoNato : '2° ' + suffissoNato}) ${casataNome}`;
+    // Dicitura specifica del ruolo con l'ordine cronologico/gemello
+    let roleText = `${role} · ${i + 1}° ${suffissoNato}`;
+    if (child.metadata.gemelloDi) {
+        roleText = `${role} · ${labelGemello} (${child.metadata.ordineGemello === 1 ? '1° ' + suffissoNato : '2° ' + suffissoNato})`;
+    }
+
+    // Stringa completa usata sia nei profili utente sia (se desiderato) come ruolo
+    const fullRoleString = `${roleText} ${casataNome}`;
+
+    // Manteniamo la mappa della famiglia allineata
+    updatedFigli[child.id] = {
+        ruolo: roleText, // Oppure fullRoleString se vuoi anche il nome casata qui
+        gemelloDi: child.metadata.gemelloDi || '',
+        ordineGemello: child.metadata.ordineGemello || 0
+    };
+
+    // Sincronizziamo il documento singolo dell'utente
+    const userRef = window.FB.doc(window.db, 'guilds', guildId, 'users', resolveFamilyMemberId(child.id));
+    batch.set(userRef, { family_role: fullRoleString }, { merge: true });
 }
 
-                            updatedFigli[child.id] = {
-                                ruolo: role,
-                                gemelloDi: child.metadata.gemelloDi || '',
-                                ordineGemello: child.metadata.ordineGemello || 0
-                            };
-
-                            const userRef = window.FB.doc(window.db, 'guilds', guildId, 'users', resolveFamilyMemberId(child.id));
-                            batch.set(userRef, { family_role: roleString }, { merge: true });
-                        }
-
-                        const familyData = { ...selectedItem };
-                        delete familyData.isNew;
-                        delete familyData.type_modale;
-                        const familyToSave = { ...familyData, figli: updatedFigli };
-                        const familyRef = window.FB.doc(window.db, 'guilds', guildId, 'families', selectedItem.id);
-                        batch.set(familyRef, {
-                            ...familyToSave,
-                            isNew: window.FB.deleteField()
-                        }, { merge: true });
-                        await batch.commit();
+const familyToSave = { ...selectedItem, figli: updatedFigli };
+const familyRef = window.FB.doc(window.db, 'guilds', guildId, 'families', selectedItem.id);
+batch.set(familyRef, familyToSave, { merge: true });
+await batch.commit();
 
                         setSelectedItem({ ...familyToSave, type_modale: 'family', isNew: false });
                         alert("✅ Famiglia e ruoli dei figli aggiornati con successo!");
