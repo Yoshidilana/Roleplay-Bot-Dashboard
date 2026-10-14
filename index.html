@@ -431,11 +431,105 @@ if (selectedItem?.type_modale === 'shop') {
                 }
             };
 
+            const handleSaveBuilding = async () => {
+                const buildingId = String(selectedItem.id || '').trim();
+                if (!buildingId || !String(selectedItem.nome || '').trim()) {
+                    alert("Inserisci il nome del luogo.");
+                    return;
+                }
+                if (selectedItem.isNew && buildings.some(building => building.id === buildingId)) {
+                    alert("Esiste già un luogo con questo nome. Scegli un nome diverso.");
+                    return;
+                }
+
+                const shopId = selectedItem.tipo === 'negozio' ? (selectedItem.shopVincolato || '') : '';
+                const previousBuilding = buildings.find(building => building.id === buildingId);
+                const previousShopId = previousBuilding?.shopVincolato || '';
+
+                if (shopId) {
+                    const otherLinkedBuilding = buildings.find(building =>
+                        building.id !== buildingId && building.shopVincolato === shopId
+                    );
+                    if (otherLinkedBuilding) {
+                        alert(`Il negozio selezionato è già collegato al luogo "${otherLinkedBuilding.nome || otherLinkedBuilding.id}".`);
+                        return;
+                    }
+                }
+
+                try {
+                    const batch = window.FB.writeBatch(window.db);
+                    const buildingRef = window.FB.doc(window.db, 'guilds', guildId, 'edifici', buildingId);
+                    const buildingData = {
+                        nome: String(selectedItem.nome).trim(),
+                        tipo: selectedItem.tipo,
+                        categoria: selectedItem.categoria || (selectedItem.tipo === 'negozio' ? 'pubblico' : ''),
+                        famigliaId: selectedItem.tipo === 'casa' ? (selectedItem.famigliaId || '') : '',
+                        shopVincolato: shopId,
+                        stanze: selectedItem.stanze || []
+                    };
+
+                    batch.set(buildingRef, buildingData, { merge: true });
+
+                    if (previousShopId && previousShopId !== shopId) {
+                        const previousShopRef = window.FB.doc(window.db, 'guilds', guildId, 'shops', previousShopId);
+                        const previousShopSnapshot = await window.FB.getDoc(previousShopRef);
+                        if (previousShopSnapshot.exists() && previousShopSnapshot.data().luogoFisicoId === buildingId) {
+                            batch.set(previousShopRef, {
+                                luogoFisico: false,
+                                luogoFisicoId: '',
+                                luogoFisicoNome: ''
+                            }, { merge: true });
+                        }
+                    }
+
+                    if (shopId) {
+                        const shopRef = window.FB.doc(window.db, 'guilds', guildId, 'shops', shopId);
+                        const shopSnapshot = await window.FB.getDoc(shopRef);
+                        if (!shopSnapshot.exists()) {
+                            alert("Il negozio selezionato non esiste più. Aggiorna la pagina e riprova.");
+                            return;
+                        }
+                        batch.set(shopRef, {
+                            luogoFisico: true,
+                            luogoFisicoId: buildingId,
+                            luogoFisicoNome: buildingData.nome
+                        }, { merge: true });
+                    }
+
+                    await batch.commit();
+                    setSelectedItem(null);
+                } catch (e) {
+                    console.error("Errore durante il salvataggio del luogo e del collegamento al negozio:", e);
+                    alert("Errore durante il salvataggio del luogo o del collegamento al negozio.");
+                }
+            };
+
             const handleDelete = async (collectionName, id) => {
                 if (!confirm("Eliminare definitivamente?")) return;
                 try {
                     const docRef = window.FB.doc(window.db, 'guilds', guildId, collectionName, id);
-                    await window.FB.deleteDoc(docRef);
+                    if (collectionName === 'edifici') {
+                        const buildingSnapshot = await window.FB.getDoc(docRef);
+                        const shopId = buildingSnapshot.exists() ? buildingSnapshot.data().shopVincolato : '';
+                        const batch = window.FB.writeBatch(window.db);
+                        batch.delete(docRef);
+
+                        if (shopId) {
+                            const shopRef = window.FB.doc(window.db, 'guilds', guildId, 'shops', shopId);
+                            const shopSnapshot = await window.FB.getDoc(shopRef);
+                            if (shopSnapshot.exists() && shopSnapshot.data().luogoFisicoId === id) {
+                                batch.set(shopRef, {
+                                    luogoFisico: false,
+                                    luogoFisicoId: '',
+                                    luogoFisicoNome: ''
+                                }, { merge: true });
+                            }
+                        }
+
+                        await batch.commit();
+                    } else {
+                        await window.FB.deleteDoc(docRef);
+                    }
                     setSelectedItem(null);
                 } catch (e) { alert("Errore nell'eliminazione"); }
             };
@@ -685,6 +779,13 @@ const availableJobCandidates = (citizens || []).filter(c => {
                                             <div className="flex-1">
                                                 <h3 className="font-bold uppercase">{b.nome}</h3>
                                                 <p className="text-[10px] text-slate-400 font-bold uppercase italic">{b.tipo}</p>
+                                                {b.tipo === 'negozio' && (
+                                                    <p className="text-[10px] text-emerald-600 font-bold uppercase mt-1">
+                                                        {b.shopVincolato
+                                                            ? `Attività: ${shops.find(shop => shop.id === b.shopVincolato)?.nome || b.shopVincolato}`
+                                                            : 'Nessuna attività collegata'}
+                                                    </p>
+                                                )}
                                             </div>
                                         </div>
                                     ))}
@@ -1571,7 +1672,7 @@ const availableJobCandidates = (citizens || []).filter(c => {
                     disabled={!selectedItem.isNew} 
                     className="w-full p-3 bg-slate-50 border rounded-2xl font-bold" 
                     defaultValue={selectedItem.nome} 
-                    onChange={e => setSelectedItem({...selectedItem, nome: e.target.value, id: selectedItem.isNew ? e.target.value.trim().replace(/\s+/g, '_') : selectedItem.id})} 
+                    onChange={e => setSelectedItem({...selectedItem, nome: e.target.value, id: selectedItem.isNew ? e.target.value.trim().replace(/\s+/g, '_').replace(/[\/\\]/g, '_') : selectedItem.id})} 
                     placeholder="Es: Casa Loud, Parco Centrale..." 
                 />
             </div>
@@ -1584,12 +1685,34 @@ const availableJobCandidates = (citizens || []).filter(c => {
                 >
                     <option value="casa">Casa Privata</option>
                     <option value="pubblico">Luogo Pubblico / Parco</option>
+                    <option value="negozio">Attività Commerciale (Negozio)</option>
                     <option value="scuola_asilo">Asilo (3-5 anni)</option>
                     <option value="scuola_elementari">Elementari (6-10 anni)</option>
                     <option value="scuola_medie">Medie (11-13 anni)</option>
                     <option value="scuola_superiori">Superiori (14-18 anni)</option>
                 </select>
             </div>
+
+            {selectedItem.tipo === 'negozio' && (
+                <div>
+                    <label className="text-[10px] font-black uppercase text-slate-400 ml-2">Negozio da collegare</label>
+                    <select
+                        className="w-full p-3 bg-slate-50 border rounded-2xl font-bold"
+                        value={selectedItem.shopVincolato || ''}
+                        onChange={e => setSelectedItem({...selectedItem, shopVincolato: e.target.value})}
+                    >
+                        <option value="">-- Seleziona un'attività --</option>
+                        {shops
+                            .filter(shop => !buildings.some(building =>
+                                building.id !== selectedItem.id && building.shopVincolato === shop.id
+                            ))
+                            .map(shop => (
+                                <option key={shop.id} value={shop.id}>{shop.nome || shop.id} · {shop.type || 'Attività'}</option>
+                            ))}
+                    </select>
+                    <p className="text-[10px] text-slate-400 font-bold mt-2">Il collegamento permette allo Studio di aprire il catalogo del negozio da questo luogo.</p>
+                </div>
+            )}
 
             {selectedItem.tipo === 'casa' && (
                 <div>
@@ -1648,12 +1771,7 @@ const availableJobCandidates = (citizens || []).filter(c => {
 
         <div className="flex gap-3 pt-6">
             <button 
-                onClick={() => handleSave('edifici', selectedItem.id, {
-                    nome: selectedItem.nome,
-                    tipo: selectedItem.tipo,
-                    famigliaId: selectedItem.famigliaId || "",
-                    stanze: selectedItem.stanze || []
-                })} 
+                onClick={handleSaveBuilding} 
                 className="flex-1 bg-indigo-600 text-white py-4 rounded-2xl font-black uppercase tracking-widest hover:bg-indigo-700 transition-colors"
             >
                 {selectedItem.isNew ? 'Crea Luogo' : 'Salva Modifiche'}
