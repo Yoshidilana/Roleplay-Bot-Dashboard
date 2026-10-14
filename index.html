@@ -353,7 +353,14 @@ if (selectedItem?.type_modale === 'shop') {
                 const { isNew, type_modale, ...cleanData } = data;
                 try {
                     const docRef = window.FB.doc(window.db, 'guilds', guildId, collectionName, id);
-                    await window.FB.setDoc(docRef, cleanData, { merge: true });
+                    if (collectionName === 'families') {
+                        await window.FB.setDoc(docRef, {
+                            ...cleanData,
+                            isNew: window.FB.deleteField()
+                        }, { merge: true });
+                    } else {
+                        await window.FB.setDoc(docRef, cleanData, { merge: true });
+                    }
                     setSelectedItem(null);
                 } catch (e) { alert("Errore nel salvataggio"); }
             };
@@ -2010,10 +2017,7 @@ delete familyData.type_modale;
 const familyToSave = { ...familyData, figli: updatedFigli };
 const familyRef = window.FB.doc(window.db, 'guilds', guildId, 'families', selectedItem.id);
 
-batch.set(familyRef, {
-    ...familyToSave,
-    isNew: window.FB.deleteField()
-}, { merge: true });
+batch.set(familyRef, familyToSave);
 
 await batch.commit();
 
@@ -2086,6 +2090,8 @@ await batch.commit();
                                         const familyRef = window.FB.doc(window.db, 'guilds', guildId, 'families', selectedItem.id);
                                         const familyUpdates = [
                                             new window.FB.FieldPath('figli', id),
+                                            window.FB.deleteField(),
+                                            new window.FB.FieldPath('isNew'),
                                             window.FB.deleteField()
                                         ];
 
@@ -2237,7 +2243,10 @@ await batch.commit();
                                         const familyRef = window.FB.doc(window.db, 'guilds', guildId, 'families', selectedItem.id);
                                         const batch = window.FB.writeBatch(window.db);
                                         batch.set(userRef, { family_role: `${role} ${casataNome}` }, { merge: true });
-                                        batch.set(familyRef, { figli: newFigli }, { merge: true });
+                                        batch.set(familyRef, {
+                                            figli: newFigli,
+                                            isNew: window.FB.deleteField()
+                                        }, { merge: true });
                                         await batch.commit();
                                         
                                         setSelectedItem({ ...selectedItem, figli: newFigli });
