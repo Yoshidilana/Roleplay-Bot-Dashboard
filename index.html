@@ -1909,40 +1909,48 @@ const availableJobCandidates = (citizens || []).filter(c => {
                     <div>
                         <label className="text-[10px] font-black uppercase text-slate-400">Padre / Capofamiglia</label>
                         <select
-                            className="w-full p-2.5 bg-white border rounded-xl font-bold text-xs"
-                            value={resolveFamilyMemberId(selectedItem.padre)}
-                            onChange={e => setSelectedItem({...selectedItem, padre: e.target.value})}
-                        >
-                            <option value="">-- Seleziona cittadino --</option>
-                            {selectedItem.padre && !citizens.some(member => normalizeFamilyId(member.id) === normalizeFamilyId(selectedItem.padre)) && (
-                                <option value={selectedItem.padre}>ID non trovato: {selectedItem.padre}</option>
-                            )}
-                            {[...citizens]
-                                .filter(member => !isAnimalUser(member))
-                                .sort((a, b) => `${a.nome || ''} ${a.cognome || ''}`.localeCompare(`${b.nome || ''} ${b.cognome || ''}`, 'it'))
-                                .map(member => (
-                                    <option key={member.id} value={member.id}>{member.nome} {member.cognome || ''} · {member.id}</option>
-                            ))}
-                        </select>
+    className="w-full p-2.5 bg-white border rounded-xl font-bold text-xs"
+    value={resolveFamilyMemberId(selectedItem.padre)}
+    onChange={e => setSelectedItem({...selectedItem, padre: e.target.value})}
+>
+    <option value="">-- Seleziona cittadino --</option>
+    {selectedItem.padre && !citizens.some(member => normalizeFamilyId(member.id) === normalizeFamilyId(selectedItem.padre)) && (
+        <option value={selectedItem.padre}>ID non trovato: {selectedItem.padre}</option>
+    )}
+    {[...citizens]
+        .filter(member => !isAnimalUser(member))
+        // Non puoi selezionare la persona già messa come Madre
+        .filter(member => normalizeFamilyId(member.id) !== normalizeFamilyId(selectedItem.madre))
+        // Non puoi selezionare chi è già tra i figli
+        .filter(member => !Object.keys(selectedItem.figli || {}).some(childId => normalizeFamilyId(childId) === normalizeFamilyId(member.id)))
+        .sort((a, b) => `${a.nome || ''} ${a.cognome || ''}`.localeCompare(`${b.nome || ''} ${b.cognome || ''}`, 'it'))
+        .map(member => (
+            <option key={member.id} value={member.id}>{member.nome} {member.cognome || ''} · {member.id}</option>
+    ))}
+</select>
                     </div>
                     <div>
                         <label className="text-[10px] font-black uppercase text-slate-400">Madre / Matriarca</label>
                         <select
-                            className="w-full p-2.5 bg-white border rounded-xl font-bold text-xs"
-                            value={resolveFamilyMemberId(selectedItem.madre)}
-                            onChange={e => setSelectedItem({...selectedItem, madre: e.target.value})}
-                        >
-                            <option value="">-- Seleziona cittadina --</option>
-                            {selectedItem.madre && !citizens.some(member => normalizeFamilyId(member.id) === normalizeFamilyId(selectedItem.madre)) && (
-                                <option value={selectedItem.madre}>ID non trovato: {selectedItem.madre}</option>
-                            )}
-                            {[...citizens]
-                                .filter(member => !isAnimalUser(member))
-                                .sort((a, b) => `${a.nome || ''} ${a.cognome || ''}`.localeCompare(`${b.nome || ''} ${b.cognome || ''}`, 'it'))
-                                .map(member => (
-                                    <option key={member.id} value={member.id}>{member.nome} {member.cognome || ''} · {member.id}</option>
-                            ))}
-                        </select>
+    className="w-full p-2.5 bg-white border rounded-xl font-bold text-xs"
+    value={resolveFamilyMemberId(selectedItem.madre)}
+    onChange={e => setSelectedItem({...selectedItem, madre: e.target.value})}
+>
+    <option value="">-- Seleziona cittadina --</option>
+    {selectedItem.madre && !citizens.some(member => normalizeFamilyId(member.id) === normalizeFamilyId(selectedItem.madre)) && (
+        <option value={selectedItem.madre}>ID non trovato: {selectedItem.madre}</option>
+    )}
+    {[...citizens]
+        .filter(member => !isAnimalUser(member))
+        // Non puoi selezionare la persona già messa come Padre
+        .filter(member => normalizeFamilyId(member.id) !== normalizeFamilyId(selectedItem.padre))
+        // Non puoi selezionare chi è già tra i figli
+        .filter(member => !Object.keys(selectedItem.figli || {}).some(childId => normalizeFamilyId(childId) === normalizeFamilyId(member.id)))
+        .sort((a, b) => `${a.nome || ''} ${a.cognome || ''}`.localeCompare(`${b.nome || ''} ${b.cognome || ''}`, 'it'))
+        .map(member => (
+            <option key={member.id} value={member.id}>{member.nome} {member.cognome || ''} · {member.id}</option>
+    ))}
+</select>
                     </div>
                 </div>
 
@@ -1969,13 +1977,14 @@ const availableJobCandidates = (citizens || []).filter(c => {
                         for (let i = 0; i < childEntries.length; i++) {
                             const child = childEntries[i];
                             const isFemmina = String(child.member.sesso || '').toUpperCase() === 'F';
-                            const role = isFemmina ? 'Figlia' : 'Figlio';
-                            const suffissoNato = isFemmina ? 'nata' : 'nato';
+const role = isFemmina ? 'Figlia' : 'Figlio';
+const labelGemello = isFemmina ? 'Gemella' : 'Gemello';
+const suffissoNato = isFemmina ? 'nata' : 'nato';
 
-                            let roleString = `${role} · ${i + 1}° ${suffissoNato} ${casataNome}`;
-                            if (child.metadata.gemelloDi) {
-                                roleString = `${role} · Gemello/a (${child.metadata.ordineGemello === 1 ? '1° ' + suffissoNato : '2° ' + suffissoNato}) ${casataNome}`;
-                            }
+let roleString = `${role} · ${i + 1}° ${suffissoNato} ${casataNome}`;
+if (child.metadata.gemelloDi) {
+    roleString = `${role} · ${labelGemello} (${child.metadata.ordineGemello === 1 ? '1° ' + suffissoNato : '2° ' + suffissoNato}) ${casataNome}`;
+}
 
                             updatedFigli[child.id] = {
                                 ruolo: role,
@@ -2025,30 +2034,31 @@ const availableJobCandidates = (citizens || []).filter(c => {
             <div>
                 <h4 className="text-[10px] font-black text-slate-400 uppercase mb-3 px-2">Discendenza</h4>
                 {childEntries.map((child, index) => {
-                    const { id, metadata, member: f } = child;
-                    const isFemmina = String(f.sesso || '').toUpperCase() === 'F';
-                    const labelFiglio = isFemmina ? 'Figlia' : 'Figlio';
-                    const suffissoNato = isFemmina ? 'nata' : 'nato';
-                    const ordinalText = `${index + 1}° ${suffissoNato}`;
-                    
-                    const twin = metadata.gemelloDi
-                        ? childEntries.find(entry => normalizeFamilyId(entry.id) === normalizeFamilyId(metadata.gemelloDi))
-                        : null;
-                        
-                    return (
-                        <div key={id} className="flex justify-between items-center p-3 bg-white border rounded-2xl mb-2 shadow-sm">
-                            <div className="flex items-center gap-3">
-                                <Avatar user={f} />
-                                <div>
-                                    <span className="font-black text-xs uppercase">{f.nome}</span>
-                                    <p className="text-[10px] text-blue-500 font-bold uppercase">
-                                        {labelFiglio} · {metadata.gemelloDi
-                                            ? `Gemello/a (${metadata.ordineGemello === 1 ? '1° ' + suffissoNato : '2° ' + suffissoNato})`
-                                            : ordinalText}
-                                    </p>
-                                    {twin && <p className="text-[9px] text-violet-500 font-bold uppercase">Gemello/a di {twin.member.nome}</p>}
-                                </div>
-                            </div>
+    const { id, metadata, member: f } = child;
+    const isFemmina = String(f.sesso || '').toUpperCase() === 'F';
+    const labelFiglio = isFemmina ? 'Figlia' : 'Figlio';
+    const labelGemello = isFemmina ? 'Gemella' : 'Gemello';
+    const suffissoNato = isFemmina ? 'nata' : 'nato';
+    const ordinalText = `${index + 1}° ${suffissoNato}`;
+    
+    const twin = metadata.gemelloDi
+        ? childEntries.find(entry => normalizeFamilyId(entry.id) === normalizeFamilyId(metadata.gemelloDi))
+        : null;
+        
+    return (
+        <div key={id} className="flex justify-between items-center p-3 bg-white border rounded-2xl mb-2 shadow-sm">
+            <div className="flex items-center gap-3">
+                <Avatar user={f} />
+                <div>
+                    <span className="font-black text-xs uppercase">{f.nome}</span>
+                    <p className="text-[10px] text-blue-500 font-bold uppercase">
+                        {labelFiglio} · {metadata.gemelloDi
+                            ? `${labelGemello} (${metadata.ordineGemello === 1 ? '1° ' + suffissoNato : '2° ' + suffissoNato})`
+                            : ordinalText}
+                    </p>
+                    {twin && <p className="text-[9px] text-violet-500 font-bold uppercase">{labelGemello} di {twin.member.nome}</p>}
+                </div>
+            </div>
                             <div className="flex items-center gap-2">
                                 <div className="text-[10px] font-bold text-slate-400 uppercase text-right">Età: {f.eta} | {f.sesso}<br/><span className="text-[8px] italic">{f.nascita}</span></div>
                                 <button
@@ -2108,33 +2118,39 @@ const availableJobCandidates = (citizens || []).filter(c => {
                         <div className="space-y-3">
                             <div>
                                 <label className="text-[9px] font-bold text-slate-500 uppercase mb-1 block">Cittadino Umano</label>
-                                <select
-                                    value={selectedFamilyChildId}
-                                    onChange={e => {
-                                        setSelectedFamilyChildId(e.target.value);
-                                        setSelectedFamilyTwinId('');
-                                        setSelectedFamilyTwinOrder('2');
-                                    }}
-                                    className="w-full p-2.5 rounded-xl text-xs border bg-white font-bold"
-                                >
-                                    <option value="">-- Seleziona un figlio/a --</option>
-                                    {[...citizens]
-                                        .filter(member => !isAnimalUser(member))
-                                        .filter(member =>
-                                            !Object.keys(selectedItem.figli || {}).some(childId =>
-                                                normalizeFamilyId(childId) === normalizeFamilyId(member.id)
-                                            )
-                                        )
-                                        .sort((a, b) =>
-                                            getBirthTimestamp(a.id) - getBirthTimestamp(b.id) ||
-                                            `${a.nome || ''} ${a.cognome || ''}`.localeCompare(`${b.nome || ''} ${b.cognome || ''}`, 'it')
-                                        )
-                                        .map(member => (
-                                            <option key={member.id} value={member.id}>
-                                                {member.nome} {member.cognome || ''} · {formatBirthday(getMemberBirthday(member))}
-                                            </option>
-                                        ))}
-                                </select>
+<select
+    value={selectedFamilyChildId}
+    onChange={e => {
+        setSelectedFamilyChildId(e.target.value);
+        setSelectedFamilyTwinId('');
+        setSelectedFamilyTwinOrder('2');
+    }}
+    className="w-full p-2.5 rounded-xl text-xs border bg-white font-bold"
+>
+    <option value="">-- Seleziona un figlio/a --</option>
+    {[...citizens]
+        .filter(member => !isAnimalUser(member))
+        // Esclude Padre e Madre dai figli
+        .filter(member => 
+            normalizeFamilyId(member.id) !== normalizeFamilyId(selectedItem.padre) &&
+            normalizeFamilyId(member.id) !== normalizeFamilyId(selectedItem.madre)
+        )
+        // Esclude chi è già stato aggiunto come figlio
+        .filter(member =>
+            !Object.keys(selectedItem.figli || {}).some(childId =>
+                normalizeFamilyId(childId) === normalizeFamilyId(member.id)
+            )
+        )
+        .sort((a, b) =>
+            getBirthTimestamp(a.id) - getBirthTimestamp(b.id) ||
+            `${a.nome || ''} ${a.cognome || ''}`.localeCompare(`${b.nome || ''} ${b.cognome || ''}`, 'it')
+        )
+        .map(member => (
+            <option key={member.id} value={member.id}>
+                {member.nome} {member.cognome || ''} · {formatBirthday(getMemberBirthday(member))}
+            </option>
+        ))}
+</select>
                             </div>
                             <div>
                                 <label className="text-[9px] font-bold text-slate-500 uppercase mb-1 block">Gemello/a di (facoltativo)</label>
