@@ -131,6 +131,8 @@ function App() {
     const [selectedClass, setSelectedClass] = useState('');
     const [newNpcClass, setNewNpcClass] = useState('');
     const [npcSesso, setNpcSesso] = useState('M'); // <-- AGGIUNTO QUESTO!
+    const [jobStaffSearch, setJobStaffSearch] = useState('');
+    const [selectedJobStaffId, setSelectedJobStaffId] = useState('');
     
     const guildId = '1474184081267884136';
 
@@ -147,6 +149,11 @@ function App() {
     // Form temporanei per creazione NPC
     const [newNpcName, setNewNpcName] = useState('');
     const [newNpcRole, setNewNpcRole] = useState('');
+
+    useEffect(() => {
+        setJobStaffSearch('');
+        setSelectedJobStaffId('');
+    }, [selectedItem?.type_modale, selectedItem?.id]);
 
     // 1. Caricamento dati generali
     useEffect(() => {
@@ -449,6 +456,22 @@ if (selectedItem?.type_modale === 'shop') {
                 const date = new Date(birthday);
                 return Number.isNaN(date.getTime()) ? String(birthday) : date.toLocaleDateString('it-IT');
             };
+
+ const queryCerca = (jobStaffSearch || '').trim().toLowerCase();
+
+const availableJobCandidates = (citizens || []).filter(c => {
+    // A. Deve essere umano e disoccupato/cittadino
+    if (!eUmanoEDisponibile(c)) return false;
+
+    // B. Se c'è un testo di ricerca, filtra per Nome, Cognome o ID
+    if (queryCerca) {
+        const nomeCompleto = `${c.nome || ''} ${c.cognome || ''} ${c.id || ''}`.toLowerCase();
+        return nomeCompleto.includes(queryCerca);
+    }
+
+    return true;
+})
+                .sort((a, b) => `${a.nome || ''} ${a.cognome || ''}`.localeCompare(`${b.nome || ''} ${b.cognome || ''}`, 'it'));
 
             return (
                 <div className="flex h-screen overflow-hidden text-slate-900 font-sans">
@@ -1348,13 +1371,59 @@ if (selectedItem?.type_modale === 'shop') {
             </div>
             <div className="p-3 bg-emerald-50 rounded-2xl border border-dashed border-emerald-200">
                 <p className="text-[10px] font-black text-emerald-600 uppercase mb-2">Assumi nel Registro</p>
-                <div className="flex gap-2">
-                    <input id="job-staff-id" placeholder="ID Discord o NPC" className="flex-1 p-2 rounded-lg text-xs border bg-white" />
-                    <button onClick={() => {
-                        const id = document.getElementById('job-staff-id').value;
-                        if(id) { handleSave('users', id, { lavoro: selectedItem.id }); document.getElementById('job-staff-id').value = ''; }
-                    }} className="bg-emerald-600 text-white p-2 rounded-lg"><Icon name="user-plus" size={16}/></button>
-                </div>
+                <label className="text-[9px] font-bold text-slate-400 uppercase mb-1 block" htmlFor="job-staff-search">Filtra per nome o ID</label>
+                <input
+                    id="job-staff-search"
+                    type="search"
+                    value={jobStaffSearch}
+                    onChange={e => {
+                        setJobStaffSearch(e.target.value);
+                        setSelectedJobStaffId('');
+                    }}
+                    placeholder="Cerca cittadino..."
+                    className="w-full p-2.5 rounded-xl text-xs border bg-white font-bold outline-none mb-2"
+                />
+                <label className="text-[9px] font-bold text-slate-400 uppercase mb-1 block" htmlFor="job-staff-select">Cittadini disponibili</label>
+                <select
+                    id="job-staff-select"
+                    value={selectedJobStaffId}
+                    onChange={e => setSelectedJobStaffId(e.target.value)}
+                    className="w-full p-2.5 rounded-xl text-xs border bg-white font-bold outline-none"
+                >
+                    <option value="">-- Seleziona cittadino --</option>
+                    {availableJobCandidates.map(c => (
+                        <option key={c.id} value={c.id}>{c.nome} {c.cognome || ''} · {c.id}</option>
+                    ))}
+                </select>
+                {selectedItem.isNew || !selectedItem.id ? (
+                    <p className="text-[10px] text-amber-700 font-bold mt-2">Salva prima la qualifica per poter assumere nel registro.</p>
+                ) : null}
+                {availableJobCandidates.length === 0 && (
+                    <p className="text-[10px] text-slate-400 font-bold mt-2">
+                        {jobStaffSearch.trim() ? 'Nessun cittadino disponibile corrisponde alla ricerca.' : "Nessun cittadino disponibile per l'assunzione."}
+                    </p>
+                )}
+                <button
+                    disabled={!selectedJobStaffId || selectedItem.isNew || !selectedItem.id}
+                    onClick={async () => {
+                        if (!selectedJobStaffId) return alert("Seleziona un cittadino da assumere.");
+                        if (!selectedItem.id || selectedItem.isNew) return alert("Salva prima la qualifica.");
+
+                        try {
+                            const userRef = window.FB.doc(window.db, 'guilds', guildId, 'users', selectedJobStaffId);
+                            await window.FB.setDoc(userRef, { lavoro: selectedItem.id }, { merge: true });
+                            setSelectedJobStaffId('');
+                            setJobStaffSearch('');
+                        } catch (e) {
+                            console.error("Errore durante l'assunzione nel registro lavori:", e);
+                            alert("Errore durante l'assunzione nel registro lavori.");
+                        }
+                    }}
+                    className="w-full mt-3 bg-emerald-600 hover:bg-emerald-700 disabled:bg-slate-300 disabled:cursor-not-allowed text-white p-2.5 rounded-xl font-black text-xs uppercase tracking-wider flex items-center justify-center gap-2 transition-all"
+                >
+                    <Icon name="user-plus" size={16}/>
+                    Assumi cittadino
+                </button>
             </div>
         </div>
 
@@ -1778,6 +1847,28 @@ function getCandidatiIdonei(school, allUsers) {
         // Fallback generico per scuole
         return eta >= 3 && eta <= 19;
     });
+}
+
+// Verifica se un utente è un essere umano e se è disponibile/disoccupato per un lavoro
+function eUmanoEDisponibile(u) {
+    if (!u) return false;
+
+    // 1. FILTRO ANIMALI (stessa regex usata per le scuole)
+    if (u.specie && /\b(?:animale|pet|can(?:e|i)|gatt(?:o|i)|lup(?:o|i)|ors(?:o|i)|volp(?:e|i)|conigl(?:io|i)|leon(?:e|i)|tig(?:re|ri)|pum(?:a|e)|leopard(?:o|i)|giaguar(?:o|i)|scimmi(?:a|e)|gorill(?:a|e)|babbuin(?:o|i)|cerv(?:o|i)|ren(?:o|i|na|ne)|cavall(?:o|i)|mucc(?:h|he)|pecor(?:a|e)|maial(?:e|i)|capr(?:a|e)|gallin(?:a|e)|poll(?:o|i)|anat(?:ra|re)|oc(?:a|he)|paper(?:a|i)|cign(?:o|i)|falc(?:o|i)|aquil(?:a|e)|guf(?:o|i)|corv(?:o|i)|piccion(?:e|i)|passer(?:o|i)|canarin(?:o|i)|cricet(?:o|i)|top(?:o|i)|ratt(?:o|i)|furett(?:o|i)|tartarug(?:a|he)|lucertol(?:a|e)|serpent(?:e|i)|ran(?:a|e)|rosp(?:o|i)|coccodrill(?:o|i)|alligat(?:ore|ori)|delfin(?:o|i)|balen(?:a|e)|squal(?:o|i)|pesc(?:e|i)|medus(?:a|e)|polp(?:o|i)|granch(?:io|i)|gamber(?:o|i)|cavallucci? marini?|pinguin(?:o|i)|pand(?:a|e)|koal(?:a|e)|scoiattol(?:o|i)|elefant(?:e|i)|rinoceront(?:e|i)|ippopotam(?:o|i)|giraff(?:a|e)|zebr(?:a|e)|fennec|procion(?:e|i))\b/i.test(String(u.specie))) {
+        return false;
+    }
+
+    // 2. FILTRO LAVORO / DISOCCUPAZIONE
+    const lavoro = String(u.lavoro || u.job || '').trim().toLowerCase();
+    
+    // Lista di valori che indicano la mancanza di un impiego specifico
+    const statoDisoccupato = [
+        '', 'nessuno', 'nessun lavoro', 
+        'disoccupato', 'disoccupata', 
+        'cittadino', 'cittadina'
+    ];
+
+    return statoDisoccupato.includes(lavoro);
 }
 
 if ('serviceWorker' in navigator && (window.location.protocol === 'https:' || window.location.hostname === 'localhost')) {
