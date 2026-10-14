@@ -136,6 +136,7 @@ function App() {
     const [selectedFamilyChildId, setSelectedFamilyChildId] = useState('');
     const [selectedFamilyTwinId, setSelectedFamilyTwinId] = useState('');
     const [selectedFamilyTwinOrder, setSelectedFamilyTwinOrder] = useState('2');
+    const [selectedFamilyPetId, setSelectedFamilyPetId] = useState('');
     
     const guildId = '1474184081267884136';
 
@@ -162,6 +163,7 @@ function App() {
         setSelectedFamilyChildId('');
         setSelectedFamilyTwinId('');
         setSelectedFamilyTwinOrder('2');
+        setSelectedFamilyPetId('');
     }, [selectedItem?.type_modale, selectedItem?.id]);
 
     // 1. Caricamento dati generali
@@ -1825,6 +1827,12 @@ const availableJobCandidates = (citizens || []).filter(c => {
         const citizen = citizens.find(member => normalizeFamilyId(member.id) === normalized);
         return citizen?.id || String(value || '');
     };
+    
+    const isAnimalUser = (u) => {
+        if (!u) return false;
+        return Boolean(u.specie && /\b(?:animale|pet|can(?:e|i)|gatt(?:o|i)|lup(?:o|i)|ors(?:o|i)|volp(?:e|i)|conigl(?:io|i)|leon(?:e|i)|tig(?:re|ri)|pum(?:a|e)|leopard(?:o|i)|giaguar(?:o|i)|scimmi(?:a|e)|gorill(?:a|e)|babbuin(?:o|i)|cerv(?:o|i)|ren(?:o|i|na|ne)|cavall(?:o|i)|mucc(?:h|he)|pecor(?:a|e)|maial(?:e|i)|capr(?:a|e)|gallin(?:a|e)|poll(?:o|i)|anat(?:ra|re)|oc(?:a|he)|paper(?:a|i)|cign(?:o|i)|falc(?:o|i)|aquil(?:a|e)|guf(?:o|i)|corv(?:o|i)|piccion(?:e|i)|passer(?:o|i)|canarin(?:o|i)|cricet(?:o|i)|top(?:o|i)|ratt(?:o|i)|furett(?:o|i)|tartarug(?:a|he)|lucertol(?:a|e)|serpent(?:e|i)|ran(?:a|e)|rosp(?:o|i)|coccodrill(?:o|i)|alligat(?:ore|ori)|delfin(?:o|i)|balen(?:a|e)|squal(?:o|i)|pesc(?:e|i)|medus(?:a|e)|polp(?:o|i)|granch(?:io|i)|gamber(?:o|i)|cavallucci? marini?|pinguin(?:o|i)|pand(?:a|e)|koal(?:a|e)|scoiattol(?:o|i)|elefant(?:e|i)|rinoceront(?:e|i)|ippopotam(?:o|i)|giraff(?:a|e)|zebr(?:a|e)|fennec|procion(?:e|i))\b/i.test(String(u.specie)));
+    };
+
     const getChildMetadata = value => typeof value === 'object' && value !== null
         ? {
             ruolo: value.ruolo || 'Figlio/a',
@@ -1832,6 +1840,7 @@ const availableJobCandidates = (citizens || []).filter(c => {
             ordineGemello: Number(value.ordineGemello) || 0
         }
         : { ruolo: 'Figlio/a', gemelloDi: '', ordineGemello: 0 };
+        
     const getBirthTimestamp = memberId => {
         const birthday = getMemberBirthday(getFullMemberData(memberId));
         const italianDate = String(birthday).match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
@@ -1840,6 +1849,7 @@ const availableJobCandidates = (citizens || []).filter(c => {
             : new Date(birthday);
         return Number.isNaN(date.getTime()) ? Number.MAX_SAFE_INTEGER : date.getTime();
     };
+    
     const childEntries = Object.entries(selectedItem.figli || {})
         .map(([id, value]) => ({ id, metadata: getChildMetadata(value), member: getFullMemberData(id) }))
         .sort((a, b) =>
@@ -1847,42 +1857,33 @@ const availableJobCandidates = (citizens || []).filter(c => {
             (a.metadata.ordineGemello || 0) - (b.metadata.ordineGemello || 0) ||
             a.member.nome.localeCompare(b.member.nome, 'it')
         );
+        
     const selectedChild = citizens.find(member => member.id === selectedFamilyChildId);
     const eligibleTwinSiblings = childEntries.filter(child =>
         !child.metadata.gemelloDi &&
         normalizeFamilyId(child.id) !== normalizeFamilyId(selectedFamilyChildId)
     );
     
-    // Funzione helper locale con verifica dell'esistenza dell'utente
-const updateMemberFamilyRole = async (memberId, roleText) => {
-    if (!memberId) return true;
-    
-    // Pulizia dell'ID
-    const cleanId = memberId.replace(/<@!?|>|/g, "").trim();
-    const uId = /^\d+$/.test(cleanId) ? cleanId : cleanId.toLowerCase().replace(/\s+/g, "_");
-    
-    if (!uId) return false;
+    const updateMemberFamilyRole = async (memberId, roleText) => {
+        if (!memberId) return true;
+        const cleanId = memberId.replace(/<@!?|>|/g, "").trim();
+        const uId = /^\d+$/.test(cleanId) ? cleanId : cleanId.toLowerCase().replace(/\s+/g, "_");
+        if (!uId) return false;
+        
+        const existingMember = getFullMemberData(uId);
+        if (!existingMember || !existingMember.id) {
+            alert(`⚠️ Utente con ID "${memberId}" non trovato nel database cittadini!`);
+            return false;
+        }
 
-    // 1. Verifica tramite l'helper di lettura che hai già nel componente
-    const existingMember = getFullMemberData(uId);
-
-        // Se l'oggetto restituito non ha un ID, significa che non è stato trovato nel database (fallback di getFullMemberData)
-    if (!existingMember || !existingMember.id) {
-        alert(`⚠️ Utente con ID "${memberId}" non trovato nel database cittadini! Operazione annullata per evitare la creazione di personaggi fantasma.`);
-        return false;
-    }
-
-    // 2. Se esiste, aggiorna il family_role
-    const userRef = window.FB.doc(window.db, 'guilds', guildId, 'users', uId);
-    await window.FB.setDoc(userRef, { family_role: roleText }, { merge: true });
-    return true;
-};
+        const userRef = window.FB.doc(window.db, 'guilds', guildId, 'users', uId);
+        await window.FB.setDoc(userRef, { family_role: roleText }, { merge: true });
+        return true;
+    };
 
     return (
         <div className="space-y-6">
             <div className="bg-slate-50 p-4 rounded-3xl mb-4 space-y-2">
-                
-                {/* ID Famiglia: Modificabile SOLO se isNew è true */}
                 <div>
                     <label className="text-[10px] font-black uppercase text-slate-400">ID Famiglia</label>
                     {selectedItem.isNew ? (
@@ -1904,67 +1905,66 @@ const updateMemberFamilyRole = async (memberId, roleText) => {
                     <input className="w-full p-2 bg-white border rounded-xl font-bold" defaultValue={selectedItem.nome || selectedItem.id} onChange={e => setSelectedItem({...selectedItem, nome: e.target.value})} />
                 </div>
 
-<div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-    <div>
-        <label className="text-[10px] font-black uppercase text-slate-400">Padre / Capofamiglia</label>
-        <select
-            className="w-full p-2.5 bg-white border rounded-xl font-bold text-xs"
-            value={resolveFamilyMemberId(selectedItem.padre)}
-            onChange={e => setSelectedItem({...selectedItem, padre: e.target.value})}
-        >
-            <option value="">-- Seleziona cittadino --</option>
-            {selectedItem.padre && !citizens.some(member => normalizeFamilyId(member.id) === normalizeFamilyId(selectedItem.padre)) && (
-                <option value={selectedItem.padre}>ID non trovato: {selectedItem.padre}</option>
-            )}
-            {[...citizens].sort((a, b) => `${a.nome || ''} ${a.cognome || ''}`.localeCompare(`${b.nome || ''} ${b.cognome || ''}`, 'it')).map(member => (
-                <option key={member.id} value={member.id}>{member.nome} {member.cognome || ''} · {member.id}</option>
-            ))}
-        </select>
-    </div>
-    <div>
-        <label className="text-[10px] font-black uppercase text-slate-400">Madre / Matriarca</label>
-        <select
-            className="w-full p-2.5 bg-white border rounded-xl font-bold text-xs"
-            value={resolveFamilyMemberId(selectedItem.madre)}
-            onChange={e => setSelectedItem({...selectedItem, madre: e.target.value})}
-        >
-            <option value="">-- Seleziona cittadina --</option>
-            {selectedItem.madre && !citizens.some(member => normalizeFamilyId(member.id) === normalizeFamilyId(selectedItem.madre)) && (
-                <option value={selectedItem.madre}>ID non trovato: {selectedItem.madre}</option>
-            )}
-            {[...citizens].sort((a, b) => `${a.nome || ''} ${a.cognome || ''}`.localeCompare(`${b.nome || ''} ${b.cognome || ''}`, 'it')).map(member => (
-                <option key={member.id} value={member.id}>{member.nome} {member.cognome || ''} · {member.id}</option>
-            ))}
-        </select>
-    </div>
-</div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div>
+                        <label className="text-[10px] font-black uppercase text-slate-400">Padre / Capofamiglia</label>
+                        <select
+                            className="w-full p-2.5 bg-white border rounded-xl font-bold text-xs"
+                            value={resolveFamilyMemberId(selectedItem.padre)}
+                            onChange={e => setSelectedItem({...selectedItem, padre: e.target.value})}
+                        >
+                            <option value="">-- Seleziona cittadino --</option>
+                            {selectedItem.padre && !citizens.some(member => normalizeFamilyId(member.id) === normalizeFamilyId(selectedItem.padre)) && (
+                                <option value={selectedItem.padre}>ID non trovato: {selectedItem.padre}</option>
+                            )}
+                            {[...citizens]
+                                .filter(member => !isAnimalUser(member))
+                                .sort((a, b) => `${a.nome || ''} ${a.cognome || ''}`.localeCompare(`${b.nome || ''} ${b.cognome || ''}`, 'it'))
+                                .map(member => (
+                                    <option key={member.id} value={member.id}>{member.nome} {member.cognome || ''} · {member.id}</option>
+                            ))}
+                        </select>
+                    </div>
+                    <div>
+                        <label className="text-[10px] font-black uppercase text-slate-400">Madre / Matriarca</label>
+                        <select
+                            className="w-full p-2.5 bg-white border rounded-xl font-bold text-xs"
+                            value={resolveFamilyMemberId(selectedItem.madre)}
+                            onChange={e => setSelectedItem({...selectedItem, madre: e.target.value})}
+                        >
+                            <option value="">-- Seleziona cittadina --</option>
+                            {selectedItem.madre && !citizens.some(member => normalizeFamilyId(member.id) === normalizeFamilyId(selectedItem.madre)) && (
+                                <option value={selectedItem.madre}>ID non trovato: {selectedItem.madre}</option>
+                            )}
+                            {[...citizens]
+                                .filter(member => !isAnimalUser(member))
+                                .sort((a, b) => `${a.nome || ''} ${a.cognome || ''}`.localeCompare(`${b.nome || ''} ${b.cognome || ''}`, 'it'))
+                                .map(member => (
+                                    <option key={member.id} value={member.id}>{member.nome} {member.cognome || ''} · {member.id}</option>
+                            ))}
+                        </select>
+                    </div>
+                </div>
 
                 <div className="flex gap-2 pt-2">
                     <button onClick={async () => {
                         const casataNome = selectedItem.nome || selectedItem.id;
-
                         if (!selectedItem.id) {
                             alert("⚠️ Inserisci un ID valido per la famiglia!");
                             return;
                         }
-
-                        // Verifichiamo prima che Padre e Madre esistano sul DB
                         if (selectedItem.padre) {
                             const okPadre = await updateMemberFamilyRole(selectedItem.padre, `Capofamiglia ${casataNome}`);
-                            if (!okPadre) return; // Si interrompe se l'ID non esiste
+                            if (!okPadre) return;
                         }
-
                         if (selectedItem.madre) {
                             const okMadre = await updateMemberFamilyRole(selectedItem.madre, `Matriarca ${casataNome}`);
-                            if (!okMadre) return; // Si interrompe se l'ID non esiste
+                            if (!okMadre) return;
                         }
-
-                        // Se i controlli sono passati, salva la famiglia
                         await handleSave('families', selectedItem.id, selectedItem);
                     }} className="flex-1 bg-blue-600 text-white py-2 rounded-xl font-bold text-[10px] uppercase">
                         {selectedItem.isNew ? 'Crea Famiglia' : 'Salva Modifiche'}
                     </button>
-                    
                     {!selectedItem.isNew && (
                         <button onClick={() => handleDelete('families', selectedItem.id)} className="p-2 bg-red-50 text-red-500 rounded-xl hover:bg-red-500 hover:text-white transition-all">
                             <Icon name="trash-2" size={18} />
@@ -1994,9 +1994,15 @@ const updateMemberFamilyRole = async (memberId, roleText) => {
                 <h4 className="text-[10px] font-black text-slate-400 uppercase mb-3 px-2">Discendenza</h4>
                 {childEntries.map((child, index) => {
                     const { id, metadata, member: f } = child;
+                    const isFemmina = String(f.sesso || '').toUpperCase() === 'F';
+                    const labelFiglio = isFemmina ? 'Figlia' : 'Figlio';
+                    const suffissoNato = isFemmina ? 'nata' : 'nato';
+                    const ordinalText = `${index + 1}° ${suffissoNato}`;
+                    
                     const twin = metadata.gemelloDi
                         ? childEntries.find(entry => normalizeFamilyId(entry.id) === normalizeFamilyId(metadata.gemelloDi))
                         : null;
+                        
                     return (
                         <div key={id} className="flex justify-between items-center p-3 bg-white border rounded-2xl mb-2 shadow-sm">
                             <div className="flex items-center gap-3">
@@ -2004,9 +2010,9 @@ const updateMemberFamilyRole = async (memberId, roleText) => {
                                 <div>
                                     <span className="font-black text-xs uppercase">{f.nome}</span>
                                     <p className="text-[10px] text-blue-500 font-bold uppercase">
-                                        {metadata.ruolo} · {metadata.gemelloDi
-                                            ? `Gemello/a ${metadata.ordineGemello === 1 ? 'nato/a per primo/a' : 'nato/a per secondo/a'}`
-                                            : `${index + 1}° nato/a`}
+                                        {labelFiglio} · {metadata.gemelloDi
+                                            ? `Gemello/a (${metadata.ordineGemello === 1 ? '1° ' + suffissoNato : '2° ' + suffissoNato})`
+                                            : ordinalText}
                                     </p>
                                     {twin && <p className="text-[9px] text-violet-500 font-bold uppercase">Gemello/a di {twin.member.nome}</p>}
                                 </div>
@@ -2040,25 +2046,17 @@ const updateMemberFamilyRole = async (memberId, roleText) => {
                                         }
 
                                         try {
-                                            const userRef = window.FB.doc(
-                                                window.db,
-                                                'guilds',
-                                                guildId,
-                                                'users',
-                                                resolveFamilyMemberId(id)
-                                            );
+                                            const userRef = window.FB.doc(window.db, 'guilds', guildId, 'users', resolveFamilyMemberId(id));
                                             const userSnapshot = await window.FB.getDoc(userRef);
                                             if (userSnapshot.exists()) {
                                                 batch.set(userRef, { family_role: '' }, { merge: true });
-                                            } else {
-                                                console.warn(`Profilo del cittadino "${id}" non trovato durante la rimozione dalla famiglia.`);
                                             }
                                             batch.update(familyRef, ...familyUpdates);
                                             await batch.commit();
                                             setSelectedItem({ ...selectedItem, figli: newFigli });
                                         } catch (e) {
-                                            console.error("Errore durante la rimozione del figlio dalla famiglia:", e);
-                                            alert("Errore durante la rimozione del figlio dalla famiglia.");
+                                            console.error("Errore rimozione figlio:", e);
+                                            alert("Errore durante la rimozione del figlio.");
                                         }
                                     }}
                                     className="p-2 text-slate-300 hover:text-red-500 transition-colors"
@@ -2071,7 +2069,7 @@ const updateMemberFamilyRole = async (memberId, roleText) => {
                     );
                 })}
 
-                {/* AGGIUNTA FIGLIO/A CON CONTROLLO PREVENTIVO */}
+                {/* AGGIUNTA FIGLIO/A */}
                 <div className="mt-4 p-3 bg-blue-50 rounded-2xl border border-dashed border-blue-200">
                     <p className="text-[10px] font-black text-blue-600 uppercase mb-3">Aggiungi Figlio/a</p>
                     {!selectedItem.isNew && (
@@ -2089,6 +2087,7 @@ const updateMemberFamilyRole = async (memberId, roleText) => {
                                 >
                                     <option value="">-- Seleziona un figlio/a --</option>
                                     {[...citizens]
+                                        .filter(member => !isAnimalUser(member))
                                         .filter(member =>
                                             !Object.keys(selectedItem.figli || {}).some(childId =>
                                                 normalizeFamilyId(childId) === normalizeFamilyId(member.id)
@@ -2137,15 +2136,10 @@ const updateMemberFamilyRole = async (memberId, roleText) => {
                                 onClick={async () => {
                                     const childId = selectedFamilyChildId;
                                     if (!childId || !selectedItem.id || !selectedChild) return;
-                                    if (Object.keys(selectedItem.figli || {}).some(id =>
-                                        normalizeFamilyId(id) === normalizeFamilyId(childId)
-                                    )) {
-                                        alert("Questo cittadino è già registrato tra i figli della famiglia.");
-                                        return;
-                                    }
-
+                                    
                                     const casataNome = selectedItem.nome || selectedItem.id;
-                                    const role = String(selectedChild.sesso || '').toUpperCase() === 'F' ? 'Figlia' : 'Figlio';
+                                    const isFemmina = String(selectedChild.sesso || '').toUpperCase() === 'F';
+                                    const role = isFemmina ? 'Figlia' : 'Figlio';
                                     const newFigli = { ...(selectedItem.figli || {}) };
 
                                     if (selectedFamilyTwinId) {
@@ -2177,22 +2171,18 @@ const updateMemberFamilyRole = async (memberId, roleText) => {
                                     try {
                                         const userRef = window.FB.doc(window.db, 'guilds', guildId, 'users', childId);
                                         const familyRef = window.FB.doc(window.db, 'guilds', guildId, 'families', selectedItem.id);
-                                        const userSnapshot = await window.FB.getDoc(userRef);
-                                        if (!userSnapshot.exists()) {
-                                            alert("Il cittadino selezionato non esiste più. Aggiorna la pagina e riprova.");
-                                            return;
-                                        }
                                         const batch = window.FB.writeBatch(window.db);
                                         batch.set(userRef, { family_role: `${role} ${casataNome}` }, { merge: true });
                                         batch.set(familyRef, { figli: newFigli }, { merge: true });
                                         await batch.commit();
+                                        
                                         setSelectedItem({ ...selectedItem, figli: newFigli });
                                         setSelectedFamilyChildId('');
                                         setSelectedFamilyTwinId('');
                                         setSelectedFamilyTwinOrder('2');
                                     } catch (e) {
-                                        console.error("Errore durante l'aggiunta del figlio alla famiglia:", e);
-                                        alert("Errore durante l'aggiunta del figlio alla famiglia.");
+                                        console.error("Errore aggiunta figlio:", e);
+                                        alert("Errore durante l'aggiunta del figlio.");
                                     }
                                 }}
                                 className="w-full bg-blue-600 hover:bg-blue-700 disabled:bg-slate-300 disabled:cursor-not-allowed text-white p-2.5 rounded-xl text-xs font-black uppercase"
@@ -2219,36 +2209,142 @@ const updateMemberFamilyRole = async (memberId, roleText) => {
                                         <p className="text-[10px] text-emerald-500 font-bold uppercase">{pet.specie}</p>
                                     </div>
                                 </div>
-                                <button onClick={() => {
-                                    const filtered = selectedItem.pets.filter((_, i) => i !== idx);
-                                    handleSave('families', selectedItem.id, {...selectedItem, pets: filtered});
+                                <button onClick={async () => {
+                                    const filtered = (selectedItem.pets || []).filter((_, i) => i !== idx);
+                                    const familyRef = window.FB.doc(window.db, 'guilds', guildId, 'families', selectedItem.id);
+                                    const userRef = window.FB.doc(window.db, 'guilds', guildId, 'users', pet.id);
+
+                                    try {
+                                        const batch = window.FB.writeBatch(window.db);
+                                        batch.set(familyRef, { pets: filtered }, { merge: true });
+
+                                        const userSnapshot = await window.FB.getDoc(userRef);
+                                        if (userSnapshot.exists()) {
+                                            const speciesRole = String(pet.specie || '').trim();
+                                            const formattedSpeciesRole = speciesRole
+                                                ? speciesRole.charAt(0).toLocaleUpperCase('it') + speciesRole.slice(1).toLocaleLowerCase('it')
+                                                : 'Animale domestico';
+                                            const familyRole = `${formattedSpeciesRole} della famiglia ${selectedItem.nome || selectedItem.id}`;
+                                            if (userSnapshot.data().family_role === familyRole) {
+                                                batch.set(userRef, { family_role: '' }, { merge: true });
+                                            }
+                                        }
+
+                                        await batch.commit();
+                                        setSelectedItem({ ...selectedItem, pets: filtered });
+                                    } catch (e) {
+                                        console.error("Errore durante la rimozione dell'animale dalla famiglia:", e);
+                                        alert("Errore durante la rimozione dell'animale dalla famiglia.");
+                                    }
                                 }} className="p-2 text-slate-300 hover:text-red-500 transition-colors"><Icon name="trash-2" size={14}/></button>
                             </div>
                         );
                     })}
                 </div>
-                <div className="p-3 bg-emerald-50 rounded-2xl border border-dashed border-emerald-200">
-                    <p className="text-[10px] font-black text-emerald-600 uppercase mb-2">Aggiungi Animale (NPC)</p>
-                    <div className="flex gap-2">
-                        <input id="new-pet-id" placeholder="ID NPC Animale" className="flex-1 p-2 rounded-lg text-xs border" />
-                        <button onClick={async () => {
-                            const id = document.getElementById('new-pet-id').value.trim();
-                            if(!id) return;
+                {!selectedItem.isNew && (
+                    <div className="p-3 bg-emerald-50 rounded-2xl border border-dashed border-emerald-200">
+                        <label className="text-[9px] font-bold text-slate-500 uppercase mb-1 block">Seleziona un animale</label>
+                        <div className="flex gap-2">
+                            <select
+                                value={selectedFamilyPetId}
+                                onChange={e => setSelectedFamilyPetId(e.target.value)}
+                                className="flex-1 min-w-0 p-2.5 rounded-xl text-xs border bg-white font-bold"
+                            >
+                                <option value="">-- Seleziona un animale --</option>
+                                {citizens
+                                    .filter(member => {
+                                        if (!isAnimalSpecies(member.specie)) return false;
+                                        const alreadyInFamily = (selectedItem.pets || []).some(pet =>
+                                            normalizeFamilyId(pet.id) === normalizeFamilyId(member.id)
+                                        );
+                                        const linkedToAnotherFamily = families.some(family =>
+                                            family.id !== selectedItem.id &&
+                                            (family.pets || []).some(pet =>
+                                                normalizeFamilyId(pet.id) === normalizeFamilyId(member.id)
+                                            )
+                                        );
+                                        return !alreadyInFamily && !linkedToAnotherFamily;
+                                    })
+                                    .sort((a, b) =>
+                                        `${a.nome || ''} ${a.cognome || ''}`.localeCompare(
+                                            `${b.nome || ''} ${b.cognome || ''}`,
+                                            'it'
+                                        )
+                                    )
+                                    .map(member => (
+                                        <option key={member.id} value={member.id}>
+                                            {member.nome} {member.cognome || ''} · {member.specie}
+                                        </option>
+                                    ))}
+                            </select>
+                            <button
+                                disabled={!selectedFamilyPetId}
+                                onClick={async () => {
+                                    const animal = citizens.find(member => member.id === selectedFamilyPetId);
+                                    if (!animal || !isAnimalSpecies(animal.specie)) {
+                                        alert("Seleziona un personaggio animale valido.");
+                                        return;
+                                    }
 
-                                                        const petObj = getFullMemberData(id);
-                            
-                            // Verifica se l'NPC esiste
-                            if (!petObj || !petObj.id) {
-                                alert(`⚠️ Animale NPC con ID "${id}" non trovato!`);
-                                return;
-                            }
+                                    const familyPets = selectedItem.pets || [];
+                                    if (familyPets.some(pet =>
+                                        normalizeFamilyId(pet.id) === normalizeFamilyId(animal.id)
+                                    )) {
+                                        alert("Questo animale è già presente nella famiglia.");
+                                        return;
+                                    }
+                                    if (families.some(family =>
+                                        family.id !== selectedItem.id &&
+                                        (family.pets || []).some(pet =>
+                                            normalizeFamilyId(pet.id) === normalizeFamilyId(animal.id)
+                                        )
+                                    )) {
+                                        alert("Questo animale è già assegnato a un'altra famiglia.");
+                                        return;
+                                    }
 
-                            const newPets = [...(selectedItem.pets || []), { id: petObj.id, nome: petObj.nome, specie: petObj.specie || "Animale" }];
-                            await handleSave('families', selectedItem.id, {...selectedItem, pets: newPets});
-                            document.getElementById('new-pet-id').value = '';
-                        }} className="bg-emerald-600 text-white p-2 rounded-lg"><Icon name="plus" size={16}/></button>
+                                    const speciesRole = String(animal.specie).trim();
+                                    const formattedSpeciesRole = speciesRole.charAt(0).toLocaleUpperCase('it') + speciesRole.slice(1).toLocaleLowerCase('it');
+                                    const familyName = selectedItem.nome || selectedItem.id;
+                                    const familyRole = `${formattedSpeciesRole} della famiglia ${familyName}`;
+                                    const newPet = {
+                                        id: animal.id,
+                                        nome: `${animal.nome || animal.id} ${animal.cognome || ''}`.trim(),
+                                        specie: speciesRole
+                                    };
+                                    const familyRef = window.FB.doc(window.db, 'guilds', guildId, 'families', selectedItem.id);
+                                    const userRef = window.FB.doc(window.db, 'guilds', guildId, 'users', animal.id);
+
+                                    try {
+                                        const userSnapshot = await window.FB.getDoc(userRef);
+                                        if (!userSnapshot.exists()) {
+                                            alert("Il personaggio animale selezionato non esiste più. Aggiorna la pagina e riprova.");
+                                            return;
+                                        }
+
+                                        const newPets = [...familyPets, newPet];
+                                        const batch = window.FB.writeBatch(window.db);
+                                        batch.set(familyRef, { pets: newPets }, { merge: true });
+                                        batch.set(userRef, { family_role: familyRole }, { merge: true });
+                                        await batch.commit();
+                                        setSelectedItem({ ...selectedItem, pets: newPets });
+                                        setSelectedFamilyPetId('');
+                                    } catch (e) {
+                                        console.error("Errore durante l'aggiunta dell'animale alla famiglia:", e);
+                                        alert("Errore durante l'aggiunta dell'animale alla famiglia.");
+                                    }
+                                }}
+                                className="shrink-0 bg-emerald-600 hover:bg-emerald-700 disabled:bg-slate-300 disabled:cursor-not-allowed text-white px-3 rounded-xl text-xs font-black uppercase"
+                            >
+                                Aggiungi
+                            </button>
+                        </div>
+                        {citizens.filter(member => isAnimalSpecies(member.specie)).length === 0 && (
+                            <p className="text-[10px] text-slate-500 mt-2">Non ci sono personaggi con una specie animale.</p>
+                        )}
                     </div>
-                </div>
+                )}
+                {selectedItem.isNew && <p className="text-[10px] text-slate-500 font-bold">Salva prima la famiglia per aggiungere gli animali.</p>}
             </div>
         </div>
     );
